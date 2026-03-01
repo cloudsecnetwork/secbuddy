@@ -1,0 +1,712 @@
+[
+  {
+    "name": "nmap",
+    "title": "Network Mapper",
+    "description": "Scan networks for hosts, open ports, and services. Put scan options in args (e.g. -sV for version, -sT for TCP connect, -p 80,443 for ports); target is the host or CIDR. Prefer at least -sV or -sT and -p when doing a port scan.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Scan options only, e.g. -sV -sT -p 80,443. Do NOT include the target host or IP here; use the target field. Include at least scan type and/or ports for useful results." },
+        "target": { "type": "string", "description": "Primary target (host, IP, or CIDR)." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "nmap",
+    "risk_category": "active",
+    "category": "network",
+    "alternatives": ["masscan"],
+    "returns": "Stdout/stderr and exit code; scan results in text form."
+  },
+  {
+    "name": "curl",
+    "title": "HTTP Client",
+    "description": "Fetch URLs and APIs. Use args for options (e.g. -I, -X POST); target is the URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Primary target URL." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "curl",
+    "risk_category": "passive",
+    "category": "http"
+  },
+  {
+    "name": "whois",
+    "title": "WHOIS Lookup",
+    "description": "Query domain or IP registration and ownership. Use args for options; target is the domain or IP.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Domain or IP to query." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "whois",
+    "risk_category": "passive",
+    "category": "recon"
+  },
+  {
+    "name": "dig",
+    "title": "DNS Lookup",
+    "description": "DNS queries (A, AAAA, MX, NS, etc.). Use args for type and options; target is the domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Domain to query." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "dig",
+    "risk_category": "passive",
+    "category": "recon"
+  },
+  {
+    "name": "openssl",
+    "title": "OpenSSL",
+    "description": "TLS/SSL and certificate checks (s_client, x509, etc.). Use args for subcommand and options; target is host:port or file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Subcommand and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Host:port or file path." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "openssl",
+    "risk_category": "passive",
+    "category": "tls"
+  },
+  {
+    "name": "traceroute",
+    "title": "Traceroute",
+    "description": "Trace route to a host. Use args for options; target is the host or IP.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Host or IP." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "traceroute",
+    "risk_category": "active",
+    "category": "network",
+    "alternatives": ["nmap"]
+  },
+  {
+    "name": "netstat",
+    "title": "Network Statistics",
+    "description": "Show network connections, routing, interfaces. Use args for options (e.g. -an); target can be empty or a filter.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options (e.g. -an). Do NOT include the target here." },
+        "target": { "type": "string", "description": "Optional filter or leave empty." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "netstat",
+    "risk_category": "passive",
+    "category": "network"
+  },
+  {
+    "name": "nuclei",
+    "title": "Nuclei Scanner",
+    "description": "Fast vulnerability scanner using templates. Use args for template and options; target is the URL or host.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Template and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "URL or host to scan." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "nuclei",
+    "risk_category": "active",
+    "category": "web",
+    "alternatives": ["nikto", "ffuf"]
+  },
+  {
+    "name": "nikto",
+    "title": "Nikto Web Scanner",
+    "description": "Web server and CGI scanner. Use args for options; target is the base URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Base URL to scan." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "nikto",
+    "risk_category": "active",
+    "category": "web",
+    "alternatives": ["nuclei", "ffuf"]
+  },
+  {
+    "name": "ffuf",
+    "title": "Fuzz Faster U Fool",
+    "description": "Web fuzzer for directories, vhosts, parameters. Use args for wordlist and options; target is the URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Wordlist and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "URL to fuzz." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "ffuf",
+    "risk_category": "active",
+    "category": "web",
+    "alternatives": ["nikto", "nuclei"]
+  },
+  {
+    "name": "subfinder",
+    "title": "Subdomain Finder",
+    "description": "Passive subdomain enumeration. Use args for options; target is the domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Domain to enumerate." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "subfinder",
+    "risk_category": "passive",
+    "category": "recon",
+    "alternatives": ["amass"]
+  },
+  {
+    "name": "sqlmap",
+    "title": "SQL Injection Tool",
+    "description": "Detect and exploit SQL injection. High impact; use with care. Use args for options; target is the URL with parameter.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Options. Do NOT include the target URL here." },
+        "target": { "type": "string", "description": "URL with parameter to test." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "sqlmap",
+    "risk_category": "high_impact",
+    "category": "web"
+  },
+  {
+    "name": "testssl",
+    "title": "TLS/SSL Tester",
+    "description": "Check TLS configuration and certificate chain. Use args for options; target is host:port.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Host:port to check." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "testssl",
+    "risk_category": "passive",
+    "category": "tls"
+  },
+  {
+    "name": "masscan",
+    "title": "Masscan Port Scanner",
+    "description": "Fast port scanner for large ranges. Use args for ports and options; target is IP or CIDR.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Ports and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "IP or CIDR to scan." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "masscan",
+    "risk_category": "active",
+    "category": "network"
+  },
+  {
+    "name": "httpie",
+    "title": "HTTPie",
+    "description": "Human-friendly HTTP client (http). Use args for method and options; target is the URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Method and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "URL." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "http",
+    "risk_category": "passive",
+    "category": "http"
+  },
+  {
+    "name": "wapiti",
+    "title": "Wapiti Web Scanner",
+    "description": "Web application vulnerability scanner. Use args for module and options; target is the base URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Module and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Base URL to scan." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "wapiti",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "amass",
+    "title": "Amass Subdomain Enumeration",
+    "description": "In-depth subdomain and asset discovery. Use args for options; target is the domain.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "CLI flags and options only. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Domain to discover." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "amass",
+    "risk_category": "passive",
+    "category": "recon",
+    "alternatives": ["subfinder"]
+  },
+  {
+    "name": "hydra",
+    "title": "Hydra Brute-Force",
+    "description": "Network login brute-forcer. High impact; use only with authorization. Use args for service and options; target is host.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Service and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Target host." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "hydra",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "tshark",
+    "title": "TShark Packet Analyzer",
+    "description": "CLI Wireshark for capture and dissection. Use args for display filters and options; target is interface or file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "args": { "type": "string", "description": "Display filters and options. Do NOT include the target here." },
+        "target": { "type": "string", "description": "Interface name or capture file." }
+      },
+      "required": ["args", "target"]
+    },
+    "binary": "tshark",
+    "risk_category": "passive",
+    "category": "network"
+  },
+  {
+    "name": "rustscan",
+    "title": "RustScan",
+    "description": "Fast port scanner. Use args for options; target is host or IP.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Host or IP." } }, "required": ["args", "target"] },
+    "binary": "rustscan",
+    "risk_category": "active",
+    "category": "network",
+    "alternatives": ["nmap", "masscan"]
+  },
+  {
+    "name": "fierce",
+    "title": "Fierce",
+    "description": "DNS reconnaissance. Use args for options; target is the domain.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Domain." } }, "required": ["args", "target"] },
+    "binary": "fierce",
+    "risk_category": "passive",
+    "category": "recon"
+  },
+  {
+    "name": "dnsenum",
+    "title": "DNS Enum",
+    "description": "Enumerate DNS information. Use args for options; target is the domain.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Domain." } }, "required": ["args", "target"] },
+    "binary": "dnsenum",
+    "risk_category": "passive",
+    "category": "recon"
+  },
+  {
+    "name": "autorecon",
+    "title": "AutoRecon",
+    "description": "Automated reconnaissance. Use args for options; target is host or IP.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Host or IP." } }, "required": ["args", "target"] },
+    "binary": "autorecon",
+    "risk_category": "active",
+    "category": "recon"
+  },
+  {
+    "name": "theharvester",
+    "title": "theHarvester",
+    "description": "Gather emails, subdomains, hosts. Use args for options; target is the domain.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Domain." } }, "required": ["args", "target"] },
+    "binary": "theHarvester",
+    "risk_category": "passive",
+    "category": "recon"
+  },
+  {
+    "name": "responder",
+    "title": "Responder",
+    "description": "LLMNR/NBT-NS poisoner. Use args for options; target is interface or network.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Interface or target." } }, "required": ["args", "target"] },
+    "binary": "responder",
+    "risk_category": "active",
+    "category": "recon"
+  },
+  {
+    "name": "netexec",
+    "title": "NetExec",
+    "description": "Network service execution (crackmapexec successor). Use args for options; target is host or range.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Host or CIDR." } }, "required": ["args", "target"] },
+    "binary": "netexec",
+    "risk_category": "active",
+    "category": "recon"
+  },
+  {
+    "name": "enum4linux-ng",
+    "title": "Enum4linux-ng",
+    "description": "SMB/LDAP enumeration. Use args for options; target is the host.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target host." } }, "required": ["args", "target"] },
+    "binary": "enum4linux-ng",
+    "risk_category": "active",
+    "category": "recon"
+  },
+  {
+    "name": "gobuster",
+    "title": "Gobuster",
+    "description": "Directory/DNS/vhost fuzzer. Use args for mode and wordlist; target is URL or domain.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options and wordlist." }, "target": { "type": "string", "description": "URL or domain." } }, "required": ["args", "target"] },
+    "binary": "gobuster",
+    "risk_category": "active",
+    "category": "web",
+    "alternatives": ["ffuf", "dirb"]
+  },
+  {
+    "name": "feroxbuster",
+    "title": "Feroxbuster",
+    "description": "Fast recursive content discovery. Use args for wordlist and options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Base URL." } }, "required": ["args", "target"] },
+    "binary": "feroxbuster",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "dirsearch",
+    "title": "Dirsearch",
+    "description": "Web path scanner. Use args for wordlist and options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Base URL." } }, "required": ["args", "target"] },
+    "binary": "dirsearch",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "dirb",
+    "title": "DIRB",
+    "description": "Web content scanner. Use args for wordlist and options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Base URL." } }, "required": ["args", "target"] },
+    "binary": "dirb",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "httpx",
+    "title": "httpx",
+    "description": "Probe URLs for status, title, tech. Use args for options; target is URL or list.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "URL(s)." } }, "required": ["args", "target"] },
+    "binary": "httpx",
+    "risk_category": "passive",
+    "category": "web"
+  },
+  {
+    "name": "katana",
+    "title": "Katana",
+    "description": "Crawler for discovery. Use args for options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Base URL." } }, "required": ["args", "target"] },
+    "binary": "katana",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "wpscan",
+    "title": "WPScan",
+    "description": "WordPress vulnerability scanner. Use args for options; target is the WordPress URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "WordPress URL." } }, "required": ["args", "target"] },
+    "binary": "wpscan",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "arjun",
+    "title": "Arjun",
+    "description": "HTTP parameter discovery. Use args for options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "URL." } }, "required": ["args", "target"] },
+    "binary": "arjun",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "paramspider",
+    "title": "ParamSpider",
+    "description": "Find parameters from wayback. Use args for options; target is the domain.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Domain." } }, "required": ["args", "target"] },
+    "binary": "paramspider",
+    "risk_category": "passive",
+    "category": "web"
+  },
+  {
+    "name": "dalfox",
+    "title": "Dalfox",
+    "description": "XSS scanner. Use args for options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "URL." } }, "required": ["args", "target"] },
+    "binary": "dalfox",
+    "risk_category": "active",
+    "category": "web"
+  },
+  {
+    "name": "wafw00f",
+    "title": "Wafw00f",
+    "description": "Detect WAFs. Use args for options; target is the URL.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "URL." } }, "required": ["args", "target"] },
+    "binary": "wafw00f",
+    "risk_category": "passive",
+    "category": "web"
+  },
+  {
+    "name": "john",
+    "title": "John the Ripper",
+    "description": "Password cracker. Use args for format and options; target is hash file or wordlist.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Hash file or wordlist." } }, "required": ["args", "target"] },
+    "binary": "john",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "hashcat",
+    "title": "Hashcat",
+    "description": "Password/hash cracker. Use args for mode and options; target is hash or wordlist.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Hash or file." } }, "required": ["args", "target"] },
+    "binary": "hashcat",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "medusa",
+    "title": "Medusa",
+    "description": "Network login brute-forcer. Use args for module and options; target is host.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target host." } }, "required": ["args", "target"] },
+    "binary": "medusa",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "patator",
+    "title": "Patator",
+    "description": "Multi-purpose brute-forcer. Use args for module and options; target varies by module.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target." } }, "required": ["args", "target"] },
+    "binary": "patator",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "crackmapexec",
+    "title": "CrackMapExec",
+    "description": "Network authentication and execution. Use args for module and options; target is host or CIDR.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Host or CIDR." } }, "required": ["args", "target"] },
+    "binary": "crackmapexec",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "evil-winrm",
+    "title": "Evil-WinRM",
+    "description": "WinRM shell. Use args for options; target is host.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target host." } }, "required": ["args", "target"] },
+    "binary": "evil-winrm",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "hash-identifier",
+    "title": "Hash-Identifier",
+    "description": "Identify hash types. Use args for options; target can be hash or file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Hash or file." } }, "required": ["args", "target"] },
+    "binary": "hash-identifier",
+    "risk_category": "passive",
+    "category": "brute_force"
+  },
+  {
+    "name": "ophcrack",
+    "title": "Ophcrack",
+    "description": "Windows password cracker (LM/NTLM). Use args for options; target is hash or dump.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Hash file or dump." } }, "required": ["args", "target"] },
+    "binary": "ophcrack",
+    "risk_category": "high_impact",
+    "category": "brute_force"
+  },
+  {
+    "name": "gdb",
+    "title": "GDB",
+    "description": "GNU debugger. Use args for options; target is binary or core.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Binary or core file." } }, "required": ["args", "target"] },
+    "binary": "gdb",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "radare2",
+    "title": "radare2",
+    "description": "Reverse engineering framework. Use args for options; target is binary or file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Binary or file." } }, "required": ["args", "target"] },
+    "binary": "r2",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "binwalk",
+    "title": "Binwalk",
+    "description": "Firmware/file analysis. Use args for options; target is the file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "File path." } }, "required": ["args", "target"] },
+    "binary": "binwalk",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "ghidra",
+    "title": "Ghidra",
+    "description": "Reverse engineering (headless). Use args for script and options; target is binary.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Binary path." } }, "required": ["args", "target"] },
+    "binary": "analyzeHeadless",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "checksec",
+    "title": "checksec",
+    "description": "Check binary security properties. Use args for options; target is binary or dir.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Binary or path." } }, "required": ["args", "target"] },
+    "binary": "checksec",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "strings",
+    "title": "strings",
+    "description": "Extract printable strings from binary. Use args for options; target is the file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "File path." } }, "required": ["args", "target"] },
+    "binary": "strings",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "objdump",
+    "title": "objdump",
+    "description": "Display object file info. Use args for options; target is the binary.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Binary path." } }, "required": ["args", "target"] },
+    "binary": "objdump",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "volatility3",
+    "title": "Volatility 3",
+    "description": "Memory forensics. Use args for plugin and options; target is memory dump.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options and plugin." }, "target": { "type": "string", "description": "Dump file." } }, "required": ["args", "target"] },
+    "binary": "vol",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "foremost",
+    "title": "Foremost",
+    "description": "File carving. Use args for options; target is image or file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Image or file." } }, "required": ["args", "target"] },
+    "binary": "foremost",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "steghide",
+    "title": "Steghide",
+    "description": "Steganography tool. Use args for options; target is the file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "File path." } }, "required": ["args", "target"] },
+    "binary": "steghide",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "exiftool",
+    "title": "ExifTool",
+    "description": "Read/write metadata. Use args for options; target is the file.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "File path." } }, "required": ["args", "target"] },
+    "binary": "exiftool",
+    "risk_category": "passive",
+    "category": "binary"
+  },
+  {
+    "name": "prowler",
+    "title": "Prowler",
+    "description": "Cloud security assessment (AWS, Azure, GCP). Use args for provider and options; target is profile or scope.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Profile or scope." } }, "required": ["args", "target"] },
+    "binary": "prowler",
+    "risk_category": "active",
+    "category": "cloud"
+  },
+  {
+    "name": "scout-suite",
+    "title": "Scout Suite",
+    "description": "Multi-cloud security auditing. Use args for provider and options; target is profile.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Profile or scope." } }, "required": ["args", "target"] },
+    "binary": "scout",
+    "risk_category": "active",
+    "category": "cloud"
+  },
+  {
+    "name": "trivy",
+    "title": "Trivy",
+    "description": "Vulnerability scanner for containers and IaC. Use args for scan type and options; target is image or path.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Image, path, or repo." } }, "required": ["args", "target"] },
+    "binary": "trivy",
+    "risk_category": "passive",
+    "category": "cloud"
+  },
+  {
+    "name": "kube-hunter",
+    "title": "kube-hunter",
+    "description": "Kubernetes security hunter. Use args for options; target is cluster or service.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target." } }, "required": ["args", "target"] },
+    "binary": "kube-hunter",
+    "risk_category": "active",
+    "category": "cloud"
+  },
+  {
+    "name": "kube-bench",
+    "title": "kube-bench",
+    "description": "Kubernetes CIS benchmark. Use args for options; target is cluster or config.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Target." } }, "required": ["args", "target"] },
+    "binary": "kube-bench",
+    "risk_category": "passive",
+    "category": "cloud"
+  },
+  {
+    "name": "docker-bench-security",
+    "title": "Docker Bench Security",
+    "description": "Docker CIS benchmark. Use args for options; target can be empty or config path.",
+    "inputSchema": { "type": "object", "properties": { "args": { "type": "string", "description": "CLI options." }, "target": { "type": "string", "description": "Optional path." } }, "required": ["args", "target"] },
+    "binary": "docker-bench-security",
+    "risk_category": "passive",
+    "category": "cloud"
+  }
+]
