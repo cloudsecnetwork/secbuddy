@@ -1,68 +1,59 @@
-//! Agent loop: send_message triggers LLM + tool execution. Approval flow for high blast radius.
+//! Rig-driven agent loop: build prompt → `CompletionModel::completion` →
+//! split text/tool calls → dedupe → ConfidencePreview → approval gate →
+//! dispatch to `tool_runner`/`mcp_client` → persist + emit `chat_event`s.
 
 use crate::audit;
 use crate::context;
 use crate::db;
+use crate::event_sink::EventSink;
 use crate::evidence;
 use crate::governance;
 use crate::llm_client;
 use crate::prompts;
-use crate::tool_runner;
+use crate::rig_orchestrator::definitions::{
+    build_tool_definitions, REPORT_FINDING_TOOL_NAME,
+};
+use crate::rig_orchestrator::events;
+use crate::rig_orchestrator::provider::RigChatModel;
 use crate::tool_registry::{ToolInfo, ToolRegistry};
+use crate::tool_runner;
+use rig::OneOrMany;
+use rig::completion::message::{AssistantContent, Message};
+use rig::completion::CompletionRequest;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tauri::Emitter;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 const MAX_ITERATIONS: u32 = 20;
 const DEFAULT_MODEL: &str = "llama3.2";
 
-/// Name of the synthetic tool the LLM uses to report security findings. Not executed; we persist and return a result.
-const REPORT_FINDING_TOOL_NAME: &str = "report_finding";
-
-/// Tool definition for report_finding: LLM reports a finding with title, severity, description, optional refs.
-fn report_finding_tool_json() -> Value {
-    json!({
-        "type": "function",
-        "function": {
-            "name": REPORT_FINDING_TOOL_NAME,
-            "description": "Report a security finding from your analysis. Call this when tool output or context clearly indicates a finding (e.g. open risky port, certificate issue, misconfiguration). Only report findings that are directly supported by the evidence. Use severity: low, medium, high, or critical.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string", "description": "Short finding title (e.g. SSH Service Exposed)" },
-                    "severity": { "type": "string", "description": "One of: low, medium, high, critical", "enum": ["low", "medium", "high", "critical"] },
-                    "description": { "type": "string", "description": "Clear description of the finding and evidence" },
-                    "mitre_ref": { "type": "string", "description": "Optional MITRE ATT&CK ID (e.g. T1021.004)" },
-                    "owasp_ref": { "type": "string", "description": "Optional OWASP reference" },
-                    "cwe_ref": { "type": "string", "description": "Optional CWE ID (e.g. CWE-295)" },
-                    "recommended_action": { "type": "string", "description": "Optional remediation or next step" }
-                },
-                "required": ["title", "severity", "description"]
-            }
-        }
-    })
+#[derive(Clone, Debug)]
+struct ParsedToolCall {
+    #[allow(dead_code)]
+    id: String,
+    name: String,
+    arguments: String,
 }
 
-/// When set (e.g. DEBUG_LLM=1), log prompt and LLM response to stderr for testing.
 fn debug_llm_enabled() -> bool {
     std::env::var("DEBUG_LLM")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
         .unwrap_or(false)
 }
 
-fn emit_chat_event(app_handle: &tauri::AppHandle, payload: Value) {
-    let _ = app_handle.emit("chat_event", payload);
+fn emit(sink: &Arc<dyn EventSink>, payload: Value) {
+    sink.emit_chat_event(payload);
 }
 
-/// Build tool context block for system prompt: tools by category, risk guidance, alternatives, and explicit rule.
+/// Build the tool-context block embedded in the system prompt: tools by
+/// category, risk classes, alternatives, and the alternative-on-failure rule.
 fn build_tool_context(tools: &ToolRegistry) -> String {
     let list = tools.list_tools();
-    // Group by category (only available tools for brevity)
-    let mut by_category: std::collections::HashMap<String, Vec<&ToolInfo>> = std::collections::HashMap::new();
+    let mut by_category: std::collections::HashMap<String, Vec<&ToolInfo>> =
+        std::collections::HashMap::new();
     for t in &list {
         if !t.available && t.source == "local" {
             continue;
@@ -98,7 +89,6 @@ fn build_tool_context(tools: &ToolRegistry) -> String {
             tools_by_cat.push_str(&format!("{}: {}.", label, names.join(", ")));
         }
     }
-    // Risk guidance
     let passive: Vec<&str> = list
         .iter()
         .filter(|t| t.risk_category == "passive")
@@ -121,13 +111,12 @@ fn build_tool_context(tools: &ToolRegistry) -> String {
         active.join(", "),
         high.join(", ")
     );
-    // Alternatives
     let alt_pairs: Vec<String> = list
         .iter()
         .filter_map(|t| {
-            t.alternatives.as_ref().map(|a| {
-                format!("{} → {}", t.name, a.join(", "))
-            })
+            t.alternatives
+                .as_ref()
+                .map(|a| format!("{} → {}", t.name, a.join(", ")))
         })
         .collect();
     let alternatives_block = if alt_pairs.is_empty() {
@@ -135,7 +124,6 @@ fn build_tool_context(tools: &ToolRegistry) -> String {
     } else {
         format!("Alternatives: {}.", alt_pairs.join("; "))
     };
-    // Explicit rule
     let rule = "When a tool returns failed or is unavailable, try one of its listed alternatives before reporting failure. \
                If the user explicitly skipped a tool, do not re-request that tool unless they ask.";
     let mut out = format!(
@@ -149,14 +137,123 @@ fn build_tool_context(tools: &ToolRegistry) -> String {
     out
 }
 
+fn parse_tool_args(args_json: &str) -> (String, String) {
+    let v: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
+    let args = v.get("args").and_then(Value::as_str).unwrap_or("").to_string();
+    let target = v.get("target").and_then(Value::as_str).unwrap_or("").to_string();
+    (args, target)
+}
 
+fn category_to_phase_label(category: &str) -> &'static str {
+    match category {
+        "network" => "network",
+        "web" => "web",
+        "recon" => "recon",
+        "tls" => "tls",
+        "http" => "http",
+        "brute_force" | "high_impact" => "security_assessment",
+        "binary" => "binary",
+        "cloud" => "cloud",
+        _ => "security_assessment",
+    }
+}
+
+fn phase_from_tool_names(tools: &ToolRegistry, tool_names: &[String]) -> Option<String> {
+    let mut labels: Vec<&'static str> = tool_names
+        .iter()
+        .filter_map(|name| {
+            tools
+                .get_category(name)
+                .as_deref()
+                .map(category_to_phase_label)
+        })
+        .collect();
+    labels.dedup();
+    if labels.len() == 1 {
+        Some(labels[0].to_string())
+    } else {
+        Some("security_assessment".to_string())
+    }
+}
+
+/// Convert our DB-backed messages into Rig's `Message` enum. Tool-result
+/// rows arrive as `role = "tool"` and are remapped to user-role messages
+/// with a "[Tool result]\n..." prefix (handled in `context::format_message_for_llm`).
+fn db_messages_to_rig(
+    api_messages: &[Value],
+) -> Result<(Option<String>, Vec<Message>), String> {
+    let mut preamble: Option<String> = None;
+    let mut history: Vec<Message> = Vec::new();
+    for m in api_messages {
+        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let content = m
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        match role {
+            "system" => {
+                preamble = Some(content);
+            }
+            "assistant" => {
+                history.push(Message::assistant(content));
+            }
+            // `context::format_message_for_llm` maps `tool` rows to a user
+            // message with a "[Tool result]" prefix, so by the time we see
+            // it here the role is already "user" or "system".
+            _ => {
+                history.push(Message::user(content));
+            }
+        }
+    }
+    Ok((preamble, history))
+}
+
+/// Walk an `AssistantContent` stream and split text from tool calls.
+/// `Reasoning` is dropped on the floor (it never leaves the model's chain of
+/// thought; we don't surface it).
+fn split_assistant_content(items: Vec<AssistantContent>) -> (String, Vec<ParsedToolCall>) {
+    let mut text = String::new();
+    let mut calls = Vec::new();
+    for item in items {
+        match item {
+            AssistantContent::Text(t) => text.push_str(&t.text),
+            AssistantContent::ToolCall(tc) => {
+                let arguments = match &tc.function.arguments {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                calls.push(ParsedToolCall {
+                    id: if tc.id.is_empty() {
+                        Uuid::new_v4().to_string()
+                    } else {
+                        tc.id.clone()
+                    },
+                    name: tc.function.name.clone(),
+                    arguments,
+                });
+            }
+            AssistantContent::Reasoning(_) => {}
+        }
+    }
+    (text, calls)
+}
+
+// All arguments are shared `AppState` handles passed straight through from the
+// `send_message` Tauri command; collapsing them into a struct would just push
+// the same fields into the call site without reducing complexity.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_agent_loop(
     pool: SqlitePool,
     tools: Arc<ToolRegistry>,
     mcp_runtime: Arc<crate::mcp_client::McpRuntime>,
-    pending_approvals: Arc<std::sync::RwLock<std::collections::HashMap<String, oneshot::Sender<String>>>>,
-    running_handles: Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::RunningToolEntry>>>,
-    app_handle: tauri::AppHandle,
+    pending_approvals: Arc<
+        std::sync::RwLock<std::collections::HashMap<String, oneshot::Sender<String>>>,
+    >,
+    running_handles: Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, crate::RunningToolEntry>>,
+    >,
+    sink: Arc<dyn EventSink>,
     chat_id: String,
     content: String,
 ) -> Result<(), String> {
@@ -171,11 +268,13 @@ pub async fn run_agent_loop(
     context::set_goal_if_empty(&pool, &chat_id, &content).await?;
 
     let config = llm_client::get_llm_config_from_pool(&pool).await?;
-    let model = db::get_setting(&pool, "llm_model")
+    let model_name = db::get_setting(&pool, "llm_model")
         .await
         .ok()
         .flatten()
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+
+    let chat_model = RigChatModel::from_config(&config, &model_name)?;
 
     let chat_mode = db::get_chat_mode(&pool, &chat_id)
         .await
@@ -204,58 +303,75 @@ pub async fn run_agent_loop(
         let tool_context = build_tool_context(&tools);
         let battle_map = context::build_battle_map_from_db(&pool, &chat_id).await?;
         let battle_map_block = context::render_battle_map(&battle_map);
-        let system_content = prompts::build_system_prompt(&chat_mode, &tool_context, Some(&battle_map_block));
-        let api_messages = context::build_api_messages(&system_content, &messages, context::WINDOW_SIZE);
+        let system_content =
+            prompts::build_system_prompt(&chat_mode, &tool_context, Some(&battle_map_block));
+        let api_messages =
+            context::build_api_messages(&system_content, &messages, context::WINDOW_SIZE);
 
-        let mut tools_json = tools.list_available_for_llm();
-        tools_json.push(report_finding_tool_json());
+        let (preamble, mut rig_history) = db_messages_to_rig(&api_messages)?;
+        // Rig requires a final prompt message; pop the last one to use as the
+        // builder's prompt so we don't double-add it.
+        let prompt_msg = rig_history.pop().unwrap_or_else(|| Message::user(""));
+
+        let tool_defs = build_tool_definitions(&tools);
 
         if debug_llm_enabled() {
-            let prompt_log = serde_json::json!({
-                "model": model,
-                "messages": api_messages,
-                "tools": tools_json
-            });
-            if let Ok(s) = serde_json::to_string_pretty(&prompt_log) {
-                log::debug!("[DEBUG_LLM] === PROMPT ===\n{}\n", s);
-            }
+            log::debug!(
+                "[DEBUG_LLM/rig] === REQUEST === model={} preamble?={} history_len={} tools={}",
+                model_name,
+                preamble.is_some(),
+                rig_history.len(),
+                tool_defs.len()
+            );
         }
 
-        let result = llm_client::chat(&config, &model, &api_messages, &tools_json).await?;
+        let request = CompletionRequest {
+            preamble,
+            chat_history: OneOrMany::many([rig_history, vec![prompt_msg]].concat())
+                .map_err(|e| format!("rig OneOrMany build failed: {}", e))?,
+            documents: Vec::new(),
+            tools: tool_defs,
+            temperature: None,
+            max_tokens: None,
+            tool_choice: None,
+            additional_params: None,
+        };
+
+        let assistant_items = chat_model
+            .complete(request)
+            .await
+            .map_err(|e| format!("rig completion failed: {}", e))?;
+        let (text, tool_calls) = split_assistant_content(assistant_items);
 
         if debug_llm_enabled() {
-            log::debug!("[DEBUG_LLM] === RESPONSE ===");
-            log::debug!("content: {}", result.content);
-            log::debug!("tool_calls: {}", result.tool_calls.len());
-            for (i, tc) in result.tool_calls.iter().enumerate() {
+            log::debug!("[DEBUG_LLM/rig] === RESPONSE ===");
+            log::debug!("content: {}", text);
+            log::debug!("tool_calls: {}", tool_calls.len());
+            for (i, tc) in tool_calls.iter().enumerate() {
                 log::debug!("  [{}] {} args={}", i, tc.name, tc.arguments);
             }
-            log::debug!("");
         }
 
-        if !result.content.is_empty() {
-            for chunk in result.content.chars().collect::<Vec<_>>().chunks(64) {
+        if !text.is_empty() {
+            for chunk in text.chars().collect::<Vec<_>>().chunks(64) {
                 let s: String = chunk.iter().collect();
-                emit_chat_event(&app_handle, json!({ "type": "MessageChunk", "content": s }));
+                emit(&sink, events::message_chunk(&s));
             }
             let assistant_msg_id = Uuid::new_v4().to_string();
-            db::insert_message(&pool, &assistant_msg_id, &chat_id, "assistant", &result.content, None)
+            db::insert_message(&pool, &assistant_msg_id, &chat_id, "assistant", &text, None)
                 .await
                 .map_err(|e| e.to_string())?;
-            emit_chat_event(&app_handle, json!({ "type": "MessageComplete", "message_id": assistant_msg_id }));
+            emit(&sink, events::message_complete(&assistant_msg_id));
         }
 
-        if result.tool_calls.is_empty() {
+        if tool_calls.is_empty() {
             break;
         }
 
-        // Dedupe by (name, arguments) so the same command only gets one approval card
         let mut seen: HashSet<(String, String)> = HashSet::new();
-        let tool_calls: Vec<_> = result
-            .tool_calls
-            .iter()
+        let tool_calls: Vec<ParsedToolCall> = tool_calls
+            .into_iter()
             .filter(|tc| seen.insert((tc.name.clone(), tc.arguments.clone())))
-            .cloned()
             .collect();
 
         let execution_mode = db::get_setting(&pool, "execution_mode")
@@ -277,13 +393,15 @@ pub async fn run_agent_loop(
             .collect();
         let phase_name = phase_from_tool_names(
             &tools,
-            &real_tool_calls.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
+            &real_tool_calls
+                .iter()
+                .map(|t| t.name.clone())
+                .collect::<Vec<_>>(),
         );
         let phase_name_ref = phase_name.as_deref();
 
         let multi_tool_batch = real_tool_calls.len() > 1;
 
-        // Build execution plan for transparency (real tools only; report_finding is not shown)
         let execution_plan: Vec<Value> = real_tool_calls
             .iter()
             .map(|tc| {
@@ -291,26 +409,13 @@ pub async fn run_agent_loop(
                 let risk_cat = tools.risk_category(&tc.name);
                 let requires_approval =
                     governance::requires_approval(&execution_mode, &risk_cat, multi_tool_batch);
-                json!({
-                    "tool_name": tc.name,
-                    "args": args_str,
-                    "target": target,
-                    "risk_category": risk_cat,
-                    "requires_approval": requires_approval
-                })
+                events::execution_plan_entry(&tc.name, &args_str, &target, &risk_cat, requires_approval)
             })
             .collect();
 
-        // Always show execution plan and explanation before any tool runs
-        emit_chat_event(
-            &app_handle,
-            json!({
-                "type": "ConfidencePreview",
-                "explanation": result.content,
-                "what_will_be_tested": result.content,
-                "tool_count": tool_calls.len(),
-                "execution_plan": execution_plan
-            }),
+        emit(
+            &sink,
+            events::confidence_preview(&text, &text, tool_calls.len(), execution_plan),
         );
 
         struct ApprovedTool {
@@ -320,13 +425,12 @@ pub async fn run_agent_loop(
             args_str: String,
             approval_id: String,
             risk_category: String,
-            /// Index into tool_calls for ordering tool result messages
             tool_call_index: usize,
         }
         let mut approved_to_run: Vec<ApprovedTool> = Vec::new();
 
-        // Pending (invocation_id, receiver, tool_name, target, args_str, risk_category, real_index)
-        let mut pending_approval_rxs: Vec<(
+        // (invocation_id, decision_rx, tool_name, target, args_str, risk_category, real_idx)
+        type PendingApprovalRx = (
             String,
             oneshot::Receiver<String>,
             String,
@@ -334,11 +438,12 @@ pub async fn run_agent_loop(
             String,
             String,
             usize,
-        )> = Vec::new();
+        );
+        let mut pending_approval_rxs: Vec<PendingApprovalRx> = Vec::new();
 
-        // Pre-process report_finding: persist findings and prepare tool result messages (no approval/run).
         let mut ordered_tool_results: Vec<(String, Option<String>)> =
             vec![(String::new(), None); tool_calls.len()];
+
         for (i, tc) in tool_calls.iter().enumerate() {
             if tc.name == REPORT_FINDING_TOOL_NAME {
                 let msg = match evidence::parse_finding_from_report_args(&tc.arguments) {
@@ -347,24 +452,20 @@ pub async fn run_agent_loop(
                             &pool,
                             &chat_id,
                             None,
-                            &[f.clone()],
+                            std::slice::from_ref(&f),
                         )
                         .await?;
                         for id in &ids {
-                            emit_chat_event(
-                                &app_handle,
-                                json!({
-                                    "type": "FindingFound",
-                                    "id": id,
-                                    "title": f.title,
-                                    "severity": f.severity,
-                                    "description": f.description
-                                }),
+                            emit(
+                                &sink,
+                                events::finding_found(id, &f.title, &f.severity, &f.description),
                             );
                         }
                         if let Err(e) = context::add_finding_to_battle_map(
                             &pool, &chat_id, &f.title, &f.severity,
-                        ).await {
+                        )
+                        .await
+                        {
                             log::error!("[battle_map] finding update failed: {}", e);
                         }
                         "Tool report_finding: status=complete, output=Finding recorded.".to_string()
@@ -378,15 +479,12 @@ pub async fn run_agent_loop(
             }
         }
 
-        // Phase 1: Create all invocations and emit all ApprovalRequired events so the UI shows every tool card at once (real tools only).
         for (j, tc) in real_tool_calls.iter().enumerate() {
             let tool_call_index = real_indices[j];
             let invocation_id = Uuid::new_v4().to_string();
             let tool_name = tc.name.clone();
             let args_json = tc.arguments.clone();
             let (args_str, target) = parse_tool_args(&args_json);
-            let args_str = args_str.clone();
-            let target = target.clone();
             let risk_category = tools.risk_category(&tool_name);
 
             let tool_source = if tools.is_mcp_tool(&tool_name) {
@@ -413,18 +511,20 @@ pub async fn run_agent_loop(
             if governance::requires_approval(&execution_mode, &risk_category, multi_tool_batch) {
                 let (tx, rx) = oneshot::channel();
                 {
-                    pending_approvals.write().unwrap().insert(invocation_id.clone(), tx);
+                    pending_approvals
+                        .write()
+                        .unwrap()
+                        .insert(invocation_id.clone(), tx);
                 }
-                emit_chat_event(
-                    &app_handle,
-                    json!({
-                        "type": "ApprovalRequired",
-                        "invocation_id": invocation_id,
-                        "tool_name": tool_name,
-                        "args": args_str,
-                        "target": target,
-                        "risk_category": risk_category
-                    }),
+                emit(
+                    &sink,
+                    events::approval_required(
+                        &invocation_id,
+                        &tool_name,
+                        &args_str,
+                        &target,
+                        &risk_category,
+                    ),
                 );
                 pending_approval_rxs.push((
                     invocation_id,
@@ -452,18 +552,17 @@ pub async fn run_agent_loop(
                 .await
                 .map_err(|e| e.to_string())?;
                 approved_to_run.push(ApprovedTool {
-                    invocation_id: invocation_id.clone(),
-                    tool_name: tool_name.clone(),
-                    target: target.clone(),
-                    args_str: args_str.clone(),
-                    approval_id: approval_id.clone(),
-                    risk_category: risk_category.clone(),
+                    invocation_id,
+                    tool_name,
+                    target,
+                    args_str,
+                    approval_id,
+                    risk_category,
                     tool_call_index,
                 });
             }
         }
 
-        // Phase 2: Wait for each approval decision and record approved / denied / dry_run.
         for (
             invocation_id,
             rx,
@@ -505,10 +604,7 @@ pub async fn run_agent_loop(
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-                emit_chat_event(
-                    &app_handle,
-                    json!({ "type": "ToolDenied", "invocation_id": invocation_id, "reason": "User denied" }),
-                );
+                emit(&sink, events::tool_denied(&invocation_id, "User denied"));
                 if let Err(e) = context::mark_tool_skipped(&pool, &chat_id, &tool_name).await {
                     log::error!("[battle_map] skipped-tool update failed: {}", e);
                 }
@@ -518,7 +614,8 @@ pub async fn run_agent_loop(
             }
 
             if decision == "dry_run" {
-                let cmd_preview = format!("{} {} {}", tool_name, args_str, target).trim().to_string();
+                let cmd_preview =
+                    format!("{} {} {}", tool_name, args_str, target).trim().to_string();
                 let skip_message = format!(
                     "Tool: {}\nCommand: {}\nStatus: SKIPPED by user\nInstruction: Do not request this tool again in this session. Continue your analysis without {} output.",
                     tool_name, cmd_preview, tool_name
@@ -534,14 +631,9 @@ pub async fn run_agent_loop(
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-                emit_chat_event(
-                    &app_handle,
-                    json!({
-                        "type": "ToolComplete",
-                        "invocation_id": invocation_id,
-                        "output": cmd_preview,
-                        "duration_ms": 0
-                    }),
+                emit(
+                    &sink,
+                    events::tool_complete_simple(&invocation_id, &cmd_preview, Some(0)),
                 );
                 if let Err(e) = context::mark_tool_skipped(&pool, &chat_id, &tool_name).await {
                     log::error!("[battle_map] skipped-tool update failed: {}", e);
@@ -551,31 +643,29 @@ pub async fn run_agent_loop(
             }
 
             approved_to_run.push(ApprovedTool {
-                invocation_id: invocation_id.clone(),
-                tool_name: tool_name.clone(),
-                target: target.clone(),
-                args_str: args_str.clone(),
-                approval_id: approval_id.clone(),
-                risk_category: risk_category.clone(),
+                invocation_id,
+                tool_name,
+                target,
+                args_str,
+                approval_id,
+                risk_category,
                 tool_call_index,
             });
         }
 
-        // Run all approved tools in parallel; register (cancel_tx, handle) so cancel_tool_invocation can kill the child
         for item in &approved_to_run {
             db::update_tool_invocation_status(&pool, &item.invocation_id, "running")
                 .await
                 .map_err(|e| e.to_string())?;
-            emit_chat_event(
-                &app_handle,
-                json!({
-                    "type": "ToolRunning",
-                    "invocation_id": item.invocation_id,
-                    "tool_name": item.tool_name,
-                    "args": item.args_str,
-                    "risk_category": item.risk_category,
-                    "phase_name": phase_name_ref
-                }),
+            emit(
+                &sink,
+                events::tool_running(
+                    &item.invocation_id,
+                    &item.tool_name,
+                    &item.args_str,
+                    &item.risk_category,
+                    phase_name_ref,
+                ),
             );
             let inv_id = item.invocation_id.clone();
             let name = item.tool_name.clone();
@@ -585,7 +675,9 @@ pub async fn run_agent_loop(
             if tools.is_mcp_tool(&item.tool_name) {
                 let server_name = tools
                     .get_mcp_server_name(&item.tool_name)
-                    .ok_or_else(|| format!("MCP server name unknown for tool: {}", item.tool_name))?;
+                    .ok_or_else(|| {
+                        format!("MCP server name unknown for tool: {}", item.tool_name)
+                    })?;
                 let mcp_runtime_clone = mcp_runtime.clone();
                 let timeout = tool_timeout_secs;
                 let handle = tokio::spawn(async move {
@@ -597,7 +689,7 @@ pub async fn run_agent_loop(
                         let args = args.clone();
                         let tgt = tgt.clone();
                         move || {
-                            let arguments = serde_json::json!({ "args": args, "target": tgt });
+                            let arguments = json!({ "args": args, "target": tgt });
                             mcp_runtime.call_tool(&server_name, &name, arguments, timeout)
                         }
                     })
@@ -634,7 +726,17 @@ pub async fn run_agent_loop(
                 let pid_clone = pid_holder.clone();
                 let timeout = tool_timeout_secs;
                 let handle = tokio::spawn(async move {
-                    tool_runner::run_local_with_cancel(&tools_clone, &inv_id, &name, &tgt, &args, timeout, pid_clone, cancel_rx).await
+                    tool_runner::run_local_with_cancel(
+                        &tools_clone,
+                        &inv_id,
+                        &name,
+                        &tgt,
+                        &args,
+                        timeout,
+                        pid_clone,
+                        cancel_rx,
+                    )
+                    .await
                 });
                 running_handles
                     .lock()
@@ -664,6 +766,7 @@ pub async fn run_agent_loop(
             };
             run_results.push(result);
         }
+
         for (item, result) in approved_to_run.iter().zip(run_results) {
             let status = result.status.clone();
             let raw_output = result.raw_output.clone();
@@ -683,36 +786,33 @@ pub async fn run_agent_loop(
             .await
             .map_err(|e| e.to_string())?;
 
-            emit_chat_event(
-                &app_handle,
-                json!({
-                    "type": "ToolComplete",
-                    "invocation_id": item.invocation_id,
-                    "output": output_str,
-                    "duration_ms": duration_ms,
-                    "status": status,
-                    "phase_name": phase_name_ref
-                }),
+            emit(
+                &sink,
+                events::tool_complete(
+                    &item.invocation_id,
+                    output_str,
+                    duration_ms,
+                    Some(&status),
+                    phase_name_ref,
+                ),
             );
 
-            if let Err(e) = context::update_battle_map(
-                &pool, &chat_id, &item.tool_name, &item.target, output_str,
-            ).await {
+            if let Err(e) =
+                context::update_battle_map(&pool, &chat_id, &item.tool_name, &item.target, output_str)
+                    .await
+            {
                 log::error!("[battle_map] update failed for {}: {}", item.tool_name, e);
             }
 
             let tool_content = format!(
                 "Tool {}: status={}, output={}",
-                item.tool_name,
-                status,
-                output_str
+                item.tool_name, status, output_str
             );
             ordered_tool_results[item.tool_call_index] =
                 (tool_content, Some(item.invocation_id.clone()));
         }
 
-        // Insert all tool result messages in tool_calls order (so LLM sees results in order).
-        for (_i, (content, inv_id)) in ordered_tool_results.iter().enumerate() {
+        for (content, inv_id) in ordered_tool_results.iter() {
             if content.is_empty() {
                 continue;
             }
@@ -733,43 +833,3 @@ pub async fn run_agent_loop(
     Ok(())
 }
 
-fn parse_tool_args(args_json: &str) -> (String, String) {
-    let v: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
-    let args = v.get("args").and_then(Value::as_str).unwrap_or("").to_string();
-    let target = v.get("target").and_then(Value::as_str).unwrap_or("").to_string();
-    (args, target)
-}
-
-/// Map registry category to UI phase label (lowercase, underscores for spaces).
-fn category_to_phase_label(category: &str) -> &'static str {
-    match category {
-        "network" => "network",
-        "web" => "web",
-        "recon" => "recon",
-        "tls" => "tls",
-        "http" => "http",
-        "brute_force" | "high_impact" => "security_assessment",
-        "binary" => "binary",
-        "cloud" => "cloud",
-        _ => "security_assessment",
-    }
-}
-
-/// Derive a phase label for the UI from tool names using registry category.
-fn phase_from_tool_names(tools: &ToolRegistry, tool_names: &[String]) -> Option<String> {
-    let mut labels: Vec<&'static str> = tool_names
-        .iter()
-        .filter_map(|name| {
-            tools
-                .get_category(name)
-                .as_deref()
-                .map(category_to_phase_label)
-        })
-        .collect();
-    labels.dedup();
-    if labels.len() == 1 {
-        Some(labels[0].to_string())
-    } else {
-        Some("security_assessment".to_string())
-    }
-}

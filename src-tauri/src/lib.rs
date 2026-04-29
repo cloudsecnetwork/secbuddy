@@ -1,12 +1,16 @@
-mod agent_loop;
 mod audit;
 mod context;
 mod db;
+mod event_sink;
 mod evidence;
 mod governance;
 mod mcp_client;
 mod llm_client;
 mod prompts;
+#[doc(hidden)]
+pub mod rig_orchestrator;
+#[doc(hidden)]
+pub mod test_support;
 mod tool_registry;
 mod tool_runner;
 
@@ -233,8 +237,20 @@ fn send_message(
     let chat_id_loop = chat_id.clone();
     let chat_id_key = chat_id.clone();
     let active_loops_cleanup = active_loops.clone();
+    let sink: std::sync::Arc<dyn event_sink::EventSink> = event_sink::from_app_handle(app_handle);
     let handle = tauri::async_runtime::spawn(async move {
-        if let Err(e) = agent_loop::run_agent_loop(pool, tools, mcp_runtime, pending_approvals, running_handles, app_handle, chat_id, content).await {
+        let result = rig_orchestrator::run_agent_loop(
+            pool.clone(),
+            tools,
+            mcp_runtime,
+            pending_approvals,
+            running_handles,
+            sink.clone(),
+            chat_id,
+            content,
+        )
+        .await;
+        if let Err(e) = result {
             let error_msg_id = uuid::Uuid::new_v4().to_string();
             let error_content = format!("[error] {}", e);
             let _ = db::insert_message(&pool_err, &error_msg_id, &chat_id_err, "assistant", &error_content, None).await;

@@ -154,6 +154,21 @@ impl ToolRegistry {
     pub fn refresh_detection_embedded(&self) -> Result<(), String> {
         self.load_local_tools_from_str(include_str!("../tools.json"))
     }
+
+    /// Test-only: bypass binary detection by force-setting an absolute path.
+    /// The registry treats the tool as available iff a path is set.
+    #[doc(hidden)]
+    pub fn force_set_local_path(&self, name: &str, path: Option<String>) {
+        if let Ok(mut guard) = self.local_tools.write() {
+            for entry in guard.iter_mut() {
+                if entry.def.name == name {
+                    entry.detected_path = path.clone();
+                    entry.available = path.is_some();
+                    return;
+                }
+            }
+        }
+    }
 }
 
 impl Default for ToolRegistry {

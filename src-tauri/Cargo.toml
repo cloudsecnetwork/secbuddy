@@ -38,7 +38,14 @@ base64 = "0.22"
 hex = "0.4"
 log = "0.4"
 env_logger = "0.11"
+async-trait = "0.1"
+rig-core = "0.24"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+mockito = "1"
+assert-json-diff = "2"
+tempfile = "3"
 

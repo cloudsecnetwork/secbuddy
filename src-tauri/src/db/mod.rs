@@ -19,3 +19,10 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, sqlx::Error> {
     migrations::run(&pool).await?;
     Ok(pool)
 }
+
+/// Apply migrations to an already-open pool. Used by integration tests that
+/// own their pool (e.g. in-memory sqlite).
+#[doc(hidden)]
+pub async fn migrations_run_for_tests(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    migrations::run(pool).await
+}
