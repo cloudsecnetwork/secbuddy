@@ -122,7 +122,7 @@ impl ToolRegistry {
         self.load_local_tools_from_str(&content)
     }
 
-    /// Detect binary path: Windows = where, macOS/Linux = which.
+    /// Detect binary path: Windows uses where, other OSes use which.
     fn detect_binary(binary: &str) -> (Option<String>, bool) {
         let mut cmd = if cfg!(target_os = "windows") {
             Command::new("where")

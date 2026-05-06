@@ -1,7 +1,7 @@
 name: Release
 
-# Build and publish SecBuddy installers for Windows, macOS (Apple Silicon + Intel),
-# and Linux whenever a `v*` tag is pushed. The workflow creates a draft GitHub
+# Build and publish SecBuddy installers for Windows and Linux whenever a `v*`
+# tag is pushed. The workflow creates a draft GitHub
 # Release with all platform artifacts attached; you publish it manually after
 # smoke-testing the binaries.
 
@@ -30,10 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
           - platform: ubuntu-22.04
             args: ""
           - platform: windows-latest
@@ -68,7 +64,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ""
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
@@ -95,15 +91,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS code signing & notarization (optional). Define these as repo secrets
-          # to produce a signed + notarized .dmg/.app. Without them you'll still get
-          # an unsigned build that users can run by right-clicking → Open.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # APPLE_* secrets intentionally disabled while macOS releases are paused.
           # Tauri updater signing (optional). Generate with `pnpm tauri signer generate`.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -120,8 +108,8 @@ jobs:
             Pick the installer for your platform from the assets below:
 
             - **Windows**: `SecBuddy_<version>_x64-setup.exe` (NSIS) or `.msi`
-            - **macOS (Apple Silicon)**: `SecBuddy_<version>_aarch64.dmg`
-            - **macOS (Intel)**: `SecBuddy_<version>_x64.dmg`
+            <!-- - **macOS (Apple Silicon)**: `SecBuddy_<version>_aarch64.dmg` -->
+            <!-- - **macOS (Intel)**: `SecBuddy_<version>_x64.dmg` -->
             - **Linux**: `.AppImage` (portable), `.deb` (Debian/Ubuntu), or `.rpm` (Fedora/RHEL)
 
             See the [CHANGELOG](https://github.com/cloudsecnetwork/secbuddy/blob/main/CHANGELOG.md) for full release notes.
