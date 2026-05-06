@@ -124,11 +124,14 @@ impl ToolRegistry {
 
     /// Detect binary path: Windows = where, macOS/Linux = which.
     fn detect_binary(binary: &str) -> (Option<String>, bool) {
-        let output = if cfg!(target_os = "windows") {
-            Command::new("where").arg(binary).output()
+        let mut cmd = if cfg!(target_os = "windows") {
+            Command::new("where")
         } else {
-            Command::new("which").arg(binary).output()
+            Command::new("which")
         };
+        cmd.arg(binary);
+        crate::process_ext::no_window_std(&mut cmd);
+        let output = cmd.output();
         match output {
             Ok(o) if o.status.success() => {
                 let path = String::from_utf8_lossy(&o.stdout)

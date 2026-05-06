@@ -237,6 +237,7 @@ fn spawn_and_register(
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
+    crate::process_ext::no_window_std(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("Failed to take stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to take stdout")?;
@@ -387,6 +388,7 @@ pub fn test_mcp_server(entry: &McpServerEntry) -> Result<u32, String> {
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null());
+    crate::process_ext::no_window_std(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().ok_or("Failed to take stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to take stdout")?;

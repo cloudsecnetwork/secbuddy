@@ -90,13 +90,13 @@ pub async fn run_local_with_cancel(
         argv.push(target.to_string());
     }
 
-    let child = match Command::new(&path)
-        .args(&argv)
+    let mut cmd = Command::new(&path);
+    cmd.args(&argv)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-    {
+        .kill_on_drop(true);
+    crate::process_ext::no_window_tokio(&mut cmd);
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             return ToolResult {
@@ -170,11 +170,12 @@ pub async fn run_local_with_cancel(
 pub fn kill_process_tree(pid: u32) {
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/F", "/T", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
+            .stderr(Stdio::null());
+        crate::process_ext::no_window_std(&mut cmd);
+        let _ = cmd.spawn();
     }
     #[cfg(not(target_os = "windows"))]
     {
