@@ -157,6 +157,7 @@ pub async fn get_chat_messages(
 }
 
 // ---- Tool invocations ----
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_tool_invocation(
     pool: &SqlitePool,
     id: &str,
@@ -382,6 +383,7 @@ pub async fn insert_approval(
 }
 
 // ---- Findings ----
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_finding(
     pool: &SqlitePool,
     id: &str,

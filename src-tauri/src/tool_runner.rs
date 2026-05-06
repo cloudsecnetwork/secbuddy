@@ -61,6 +61,7 @@ fn cancelled_result(invocation_id: &str) -> ToolResult {
 
 /// Run a local tool by name. Publishes the child PID to `pid_out` so callers can force-kill it.
 /// The cancel channel triggers a graceful stop; `kill_process_tree` handles the hard kill.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_local_with_cancel(
     registry: &ToolRegistry,
     invocation_id: &str,
