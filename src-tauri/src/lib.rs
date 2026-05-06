@@ -30,6 +30,37 @@ pub type RunningToolEntry = (
     Arc<std::sync::atomic::AtomicU32>,
 );
 
+type ChatHistoryMessage = (String, String, String, String, Option<String>, i64);
+type ToolInvocationRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<i32>,
+    Option<i64>,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    i64,
+);
+type FindingRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+);
+
 pub struct AppState {
     pub db: sqlx::sqlite::SqlitePool,
     pub app_data_dir: PathBuf,
@@ -402,7 +433,7 @@ fn get_chat_info(
 fn get_chat_history(
     state: tauri::State<AppState>,
     chat_id: String,
-) -> Result<Vec<(String, String, String, String, Option<String>, i64)>, String> {
+) -> Result<Vec<ChatHistoryMessage>, String> {
     tauri::async_runtime::block_on(async move {
         db::get_chat_messages(&state.db, &chat_id)
             .await
@@ -414,25 +445,7 @@ fn get_chat_history(
 fn get_tool_invocations_for_chat(
     state: tauri::State<AppState>,
     chat_id: String,
-) -> Result<
-    Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<i32>,
-        Option<i64>,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        i64,
-    )>,
-    String,
-> {
+) -> Result<Vec<ToolInvocationRow>, String> {
     tauri::async_runtime::block_on(async move {
         db::fix_stale_running_for_chat(&state.db, &chat_id)
             .await
@@ -447,22 +460,7 @@ fn get_tool_invocations_for_chat(
 fn get_findings_for_chat(
     state: tauri::State<AppState>,
     chat_id: String,
-) -> Result<
-    Vec<(
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-    )>,
-    String,
-> {
+) -> Result<Vec<FindingRow>, String> {
     tauri::async_runtime::block_on(async move {
         db::get_findings_for_chat(&state.db, &chat_id)
             .await
@@ -574,7 +572,7 @@ h1{{font-size:1.25rem}}
                         "<div class=\"tool\"><strong>Tool: {}</strong>",
                         escape_html(name)
                     ));
-                    if phase.as_deref().unwrap_or("").len() > 0 {
+                    if !phase.as_deref().unwrap_or("").is_empty() {
                         html.push_str(&format!(
                             " [{}]",
                             escape_html(phase.as_deref().unwrap_or(""))
