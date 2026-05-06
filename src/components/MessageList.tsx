@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useChatStore } from "../stores/chat";
 import type { Finding, Message, ToolInvocation } from "../stores/chat";
@@ -14,7 +14,7 @@ function normalizeMarkdownContent(text: string): string {
     .join("\n");
 }
 
-const markdownComponents = {
+const markdownComponents: Components = {
   p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
