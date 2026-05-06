@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  openPath as opener_openPath,
+  revealItemInDir as opener_revealItemInDir,
+} from "@tauri-apps/plugin-opener";
 
 export async function getAppDataDir(): Promise<string> {
   return invoke("get_app_data_dir");
@@ -37,6 +41,10 @@ export type McpServerEntry = {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  description?: string;
+  /** Per-server tools/call timeout in seconds. Falls back to global tool timeout when unset. */
+  timeout?: number;
+  disabled?: boolean;
 };
 
 export type McpConfig = {
@@ -68,6 +76,28 @@ export async function reloadMcpServers(): Promise<void> {
 
 export async function testMcpServer(entry: McpServerEntry): Promise<number> {
   return invoke("test_mcp_server", { entry });
+}
+
+export async function getMcpConfigText(): Promise<string> {
+  return invoke<string>("get_mcp_config_text");
+}
+
+export async function saveMcpConfigText(text: string): Promise<void> {
+  return invoke("save_mcp_config_text", { text });
+}
+
+export async function getMcpConfigPath(): Promise<string> {
+  return invoke<string>("get_mcp_config_path");
+}
+
+/** Open a file in the OS default application (e.g. mcp.json in a text editor). */
+export async function openPath(path: string): Promise<void> {
+  return opener_openPath(path);
+}
+
+/** Reveal a file in the OS file manager (Explorer/Finder/Nautilus). */
+export async function revealPath(path: string): Promise<void> {
+  return opener_revealItemInDir(path);
 }
 
 export async function sendMessage(

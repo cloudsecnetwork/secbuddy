@@ -2,7 +2,18 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { LLM_PROVIDERS, defaultLlmBaseUrl, isProviderId } from "../constants/llm";
 import { useModelsConfigStore } from "../stores/modelsConfig";
-import { saveSetting, clearAllChatHistory, getMcpConfig, saveMcpConfig, testMcpServer } from "../lib/tauri";
+import {
+  saveSetting,
+  clearAllChatHistory,
+  getMcpConfig,
+  saveMcpConfig,
+  testMcpServer,
+  getMcpConfigText,
+  saveMcpConfigText,
+  getMcpConfigPath,
+  openPath,
+  revealPath,
+} from "../lib/tauri";
 import type { McpConfig, McpServerEntry } from "../lib/tauri";
 import { useSettingsStore } from "../stores/settings";
 import type { ToolInfo } from "../stores/settings";
@@ -195,6 +206,39 @@ const SECTIONS: { id: SectionId; label: string; Icon: React.ComponentType<{ clas
   { id: "mcp", label: "MCP Servers", Icon: IconPlug },
 ];
 
+type McpView = "form" | "json";
+const MCP_VIEW_STORAGE_KEY = "secbuddy.mcp.editorTab";
+
+const DEFAULT_JSON_TEXT = '{\n  "mcpServers": {}\n}';
+
+function envEntriesToText(env: Record<string, string> | undefined): string {
+  if (!env) return "";
+  return Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+}
+
+/** Parse `KEY=VALUE` per line into a plain object. Blank/comment lines are ignored. */
+function parseEnvText(text: string): { env: Record<string, string>; error: string | null } {
+  const out: Record<string, string> = {};
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw || raw.startsWith("#")) continue;
+    const eq = raw.indexOf("=");
+    if (eq <= 0) {
+      return { env: {}, error: `Line ${i + 1}: expected KEY=VALUE` };
+    }
+    const key = raw.slice(0, eq).trim();
+    const value = raw.slice(eq + 1);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      return { env: {}, error: `Line ${i + 1}: invalid env name "${key}"` };
+    }
+    out[key] = value;
+  }
+  return { env: out, error: null };
+}
+
 function McpServersSection({ appDataDir }: { appDataDir: string }) {
   const [config, setConfig] = useState<McpConfig>({ mcpServers: {} });
   const [loading, setLoading] = useState(true);
@@ -204,20 +248,66 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
   const [formName, setFormName] = useState("");
   const [formCommand, setFormCommand] = useState("");
   const [formArgs, setFormArgs] = useState("");
+  const [formEnv, setFormEnv] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formTimeout, setFormTimeout] = useState("");
+  const [formDisabled, setFormDisabled] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ key: string; count?: number; error?: string } | null>(null);
 
-  const load = async () => {
+  const [view, setView] = useState<McpView>(() => {
+    try {
+      const stored = window.localStorage.getItem(MCP_VIEW_STORAGE_KEY);
+      return stored === "json" ? "json" : "form";
+    } catch {
+      return "form";
+    }
+  });
+  const [jsonText, setJsonText] = useState<string>(DEFAULT_JSON_TEXT);
+  const [jsonOriginal, setJsonOriginal] = useState<string>(DEFAULT_JSON_TEXT);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonSaving, setJsonSaving] = useState(false);
+  const [jsonSavedFlash, setJsonSavedFlash] = useState(false);
+  const [configPath, setConfigPath] = useState<string>("");
+
+  const switchView = (next: McpView) => {
+    setView(next);
+    try {
+      window.localStorage.setItem(MCP_VIEW_STORAGE_KEY, next);
+    } catch {
+      // localStorage may be unavailable (private mode); silent best-effort.
+    }
+  };
+
+  const loadConfig = async () => {
+    const c = await getMcpConfig();
+    setConfig(c);
+  };
+
+  const loadJsonText = async () => {
+    try {
+      const text = await getMcpConfigText();
+      setJsonText(text);
+      setJsonOriginal(text);
+      setJsonError(null);
+    } catch (e) {
+      setJsonError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const loadAll = async () => {
     setLoading(true);
     try {
-      const c = await getMcpConfig();
-      setConfig(c);
+      const path = await getMcpConfigPath();
+      setConfigPath(path);
+      await Promise.all([loadConfig(), loadJsonText()]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
+    loadAll();
   }, []);
 
   const startAdd = () => {
@@ -225,6 +315,11 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
     setFormName("");
     setFormCommand("");
     setFormArgs("");
+    setFormEnv("");
+    setFormDescription("");
+    setFormTimeout("");
+    setFormDisabled(false);
+    setFormError(null);
     setTestResult(null);
   };
 
@@ -233,27 +328,71 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
     setFormName(key);
     setFormCommand(entry.command);
     setFormArgs((entry.args ?? []).join(" "));
+    setFormEnv(envEntriesToText(entry.env));
+    setFormDescription(entry.description ?? "");
+    setFormTimeout(entry.timeout != null ? String(entry.timeout) : "");
+    setFormDisabled(Boolean(entry.disabled));
+    setFormError(null);
     setTestResult(null);
   };
 
   const cancelEdit = () => {
     setEditingKey(null);
+    setFormError(null);
     setTestResult(null);
   };
 
   const saveOne = () => {
     const name = formName.trim();
     const command = formCommand.trim();
-    if (!name || !command) return;
+    if (!name || !command) {
+      setFormError("Name and command are required");
+      return;
+    }
     const args = formArgs.trim() ? formArgs.trim().split(/\s+/) : [];
-    const next: McpConfig = {
-      mcpServers: { ...config.mcpServers, [name]: { command, args } },
+    const { env, error: envErr } = parseEnvText(formEnv);
+    if (envErr) {
+      setFormError(envErr);
+      return;
+    }
+    let timeout: number | undefined;
+    if (formTimeout.trim()) {
+      const n = parseInt(formTimeout, 10);
+      if (Number.isNaN(n) || n < 1) {
+        setFormError("Timeout must be a positive integer (seconds)");
+        return;
+      }
+      timeout = n;
+    }
+    const description = formDescription.trim() || undefined;
+    const existing =
+      editingKey && editingKey !== "__new__" ? config.mcpServers[editingKey] : undefined;
+    const next: McpServerEntry = {
+      ...(existing ?? {}),
+      command,
+      args,
+    };
+    if (Object.keys(env).length > 0) {
+      next.env = env;
+    } else {
+      delete next.env;
+    }
+    if (description) next.description = description;
+    else delete next.description;
+    if (timeout != null) next.timeout = timeout;
+    else delete next.timeout;
+    if (formDisabled) next.disabled = true;
+    else delete next.disabled;
+
+    const nextConfig: McpConfig = {
+      mcpServers: { ...config.mcpServers, [name]: next },
     };
     if (editingKey && editingKey !== "__new__" && editingKey !== name) {
-      delete next.mcpServers[editingKey];
+      delete nextConfig.mcpServers[editingKey];
     }
-    setConfig(next);
+    setConfig(nextConfig);
     setEditingKey(null);
+    setFormError(null);
   };
 
   const removeOne = (key: string) => {
@@ -263,12 +402,22 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
     if (editingKey === key) setEditingKey(null);
   };
 
+  const toggleDisabled = (key: string) => {
+    const entry = config.mcpServers[key];
+    if (!entry) return;
+    const updated: McpServerEntry = { ...entry };
+    if (entry.disabled) delete updated.disabled;
+    else updated.disabled = true;
+    setConfig({ mcpServers: { ...config.mcpServers, [key]: updated } });
+  };
+
   const handleSaveAll = async () => {
     try {
       setSaving(true);
       await saveMcpConfig(config, true);
       setSaveFeedback(true);
       setTimeout(() => setSaveFeedback(false), 1500);
+      await loadJsonText();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : String(e));
     } finally {
@@ -288,7 +437,57 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
     }
   };
 
+  const handleJsonSave = async () => {
+    setJsonError(null);
+    setJsonSaving(true);
+    try {
+      await saveMcpConfigText(jsonText);
+      setJsonSavedFlash(true);
+      setTimeout(() => setJsonSavedFlash(false), 1500);
+      setJsonOriginal(jsonText);
+      await loadConfig();
+    } catch (e) {
+      setJsonError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setJsonSaving(false);
+    }
+  };
+
+  const handleJsonReload = async () => {
+    await loadJsonText();
+    await loadConfig();
+  };
+
+  const handleJsonFormat = () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      setJsonText(JSON.stringify(parsed, null, 2));
+      setJsonError(null);
+    } catch (e) {
+      setJsonError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleOpenInEditor = async () => {
+    if (!configPath) return;
+    try {
+      await openPath(configPath);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleRevealInFolder = async () => {
+    if (!configPath) return;
+    try {
+      await revealPath(configPath);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const entries = Object.entries(config.mcpServers);
+  const jsonDirty = jsonText !== jsonOriginal;
 
   return (
     <div className="mb-8">
@@ -299,20 +498,64 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
         <div className="py-4 px-4 border-b border-[var(--border)]">
           <div className="text-[13px] font-semibold text-[var(--text)] mb-1">Configure external MCP servers</div>
           <p className="text-[11px] text-[var(--text-muted)] font-mono leading-relaxed">
-            Add stdio servers by command and arguments. Their tools will appear alongside local tools for the agent. Config is stored in app settings and optionally in mcp.json.
+            Add stdio servers via the form, or paste a vendor JSON snippet directly into the JSON tab. <span className="text-[var(--text)]">mcp.json</span> is the source of truth.
           </p>
         </div>
-        {appDataDir && (
-          <div className="flex items-center justify-between py-3 px-4 border-b border-[var(--border)] gap-4">
-            <div className="text-[11px] text-[var(--text-muted)] font-mono">Config file</div>
-            <span className="font-mono text-[11px] text-[var(--text-muted)] truncate max-w-[280px]" title={`${appDataDir}${appDataDir.endsWith("/") ? "" : "/"}mcp.json`}>
-              {appDataDir}{appDataDir.endsWith("/") ? "" : "/"}mcp.json
+
+        {/* mcp.json path + actions */}
+        <div className="flex items-center justify-between py-3 px-4 border-b border-[var(--border)] gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="text-[11px] text-[var(--text-muted)] font-mono shrink-0">Config file</span>
+            <span
+              className="font-mono text-[11px] text-[var(--text-muted)] truncate"
+              title={configPath || (appDataDir ? `${appDataDir}${appDataDir.endsWith("/") || appDataDir.endsWith("\\") ? "" : "/"}mcp.json` : "")}
+            >
+              {configPath || (appDataDir
+                ? `${appDataDir}${appDataDir.endsWith("/") || appDataDir.endsWith("\\") ? "" : "/"}mcp.json`
+                : "—")}
             </span>
           </div>
-        )}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleOpenInEditor}
+              disabled={!configPath}
+              className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Open in editor
+            </button>
+            <button
+              type="button"
+              onClick={handleRevealInFolder}
+              disabled={!configPath}
+              className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Reveal in folder
+            </button>
+          </div>
+        </div>
+
+        {/* View tabs */}
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface-2)]/30">
+          {(["form", "json"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => switchView(id)}
+              className={`py-1.5 px-3 rounded-[7px] text-[12px] font-medium transition-colors ${
+                view === id
+                  ? "bg-[var(--surface)] text-[var(--text)] border border-[var(--border)]"
+                  : "text-[var(--text-muted)] hover:text-[var(--text)] border border-transparent"
+              }`}
+            >
+              {id === "form" ? "Form" : "JSON"}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <div className="py-4 px-4 text-[12px] text-[var(--text-muted)]">Loading…</div>
-        ) : (
+        ) : view === "form" ? (
           <>
             <div className="flex items-center justify-between py-3 px-4 border-b border-[var(--border)]">
               <span className="text-[12px] font-medium text-[var(--text)]">Servers</span>
@@ -354,6 +597,46 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
                     className="flex-1 min-w-0 bg-[var(--surface)] border border-[var(--border)] rounded-[7px] py-2 px-3 text-[var(--text)] font-mono text-[12px]"
                   />
                 </div>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Description (optional)"
+                    className="flex-1 min-w-0 bg-[var(--surface)] border border-[var(--border)] rounded-[7px] py-2 px-3 text-[var(--text)] font-sans text-[12px]"
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="number"
+                    min={1}
+                    value={formTimeout}
+                    onChange={(e) => setFormTimeout(e.target.value)}
+                    placeholder="Timeout in seconds (optional, falls back to global)"
+                    className="flex-1 min-w-0 bg-[var(--surface)] border border-[var(--border)] rounded-[7px] py-2 px-3 text-[var(--text)] font-mono text-[12px]"
+                  />
+                </div>
+                <div>
+                  <textarea
+                    value={formEnv}
+                    onChange={(e) => setFormEnv(e.target.value)}
+                    placeholder={"Environment variables, KEY=VALUE per line (optional)\nAPI_KEY=secret\nDEBUG=1"}
+                    rows={3}
+                    className="w-full min-w-0 bg-[var(--surface)] border border-[var(--border)] rounded-[7px] py-2 px-3 text-[var(--text)] font-mono text-[12px] resize-y"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-[12px] text-[var(--text)] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={formDisabled}
+                    onChange={(e) => setFormDisabled(e.target.checked)}
+                    className="cursor-pointer"
+                  />
+                  Disabled (skip on reload but keep config)
+                </label>
+                {formError && (
+                  <div className="text-[11px] text-[var(--red)] font-mono">{formError}</div>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -373,49 +656,86 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
               </div>
             )}
             {entries.length === 0 && !editingKey && (
-              <div className="py-4 px-4 text-[12px] text-[var(--text-muted)]">No servers configured. Click Add server to add one.</div>
+              <div className="py-4 px-4 flex flex-col gap-2">
+                <span className="text-[12px] text-[var(--text-muted)]">No servers configured. Click Add server to add one.</span>
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  Have a vendor JSON snippet (e.g. HexStrike)?{" "}
+                  <button
+                    type="button"
+                    onClick={() => switchView("json")}
+                    className="text-[var(--accent)] underline cursor-pointer"
+                  >
+                    Paste it in the JSON tab
+                  </button>
+                  .
+                </span>
+              </div>
             )}
-            {entries.map(([key, entry]) => (
-              <div
-                key={key}
-                className="flex items-center justify-between py-3 px-4 border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface-2)]/50 gap-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[12px] font-medium text-[var(--text)]">{key}</div>
-                  <div className="font-mono text-[11px] text-[var(--text-muted)] truncate">
-                    {entry.command} {(entry.args ?? []).join(" ")}
+            {entries.map(([key, entry]) => {
+              const disabled = Boolean(entry.disabled);
+              return (
+                <div
+                  key={key}
+                  className="flex items-center justify-between py-3 px-4 border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface-2)]/50 gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-mono text-[12px] font-medium ${disabled ? "text-[var(--text-muted)]" : "text-[var(--text)]"}`}>
+                        {key}
+                      </span>
+                      {disabled && (
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] bg-[var(--surface-2)]">
+                          Disabled
+                        </span>
+                      )}
+                    </div>
+                    {entry.description && (
+                      <div className="text-[11px] text-[var(--text-muted)] truncate">
+                        {entry.description}
+                      </div>
+                    )}
+                    <div className="font-mono text-[11px] text-[var(--text-muted)] truncate">
+                      {entry.command} {(entry.args ?? []).join(" ")}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {testResult?.key === key && (
+                      <span className="text-[11px] text-[var(--text-muted)] max-w-[180px] truncate" title={testResult.error ?? undefined}>
+                        {testResult.error != null ? testResult.error : `${testResult.count ?? 0} tools`}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleDisabled(key)}
+                      className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)]"
+                    >
+                      {disabled ? "Enable" : "Disable"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTest(key)}
+                      className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)]"
+                    >
+                      Test
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(key, entry)}
+                      className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeOne(key)}
+                      className="py-1 px-2 rounded border border-[var(--red)]/50 text-[11px] font-medium text-[var(--red)] hover:bg-[var(--red)]/10"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {testResult?.key === key && (
-                    <span className="text-[11px] text-[var(--text-muted)]">
-                      {testResult.error != null ? testResult.error : `${testResult.count ?? 0} tools`}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleTest(key)}
-                    className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)]"
-                  >
-                    Test
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => startEdit(key, entry)}
-                    className="py-1 px-2 rounded border border-[var(--border)] text-[11px] font-medium text-[var(--text)] hover:bg-[var(--surface-3)]"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeOne(key)}
-                    className="py-1 px-2 rounded border border-[var(--red)]/50 text-[11px] font-medium text-[var(--red)] hover:bg-[var(--red)]/10"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             <div className="flex items-center justify-end gap-2 py-4 px-4 border-t border-[var(--border)]">
               <button
                 type="button"
@@ -424,6 +744,57 @@ function McpServersSection({ appDataDir }: { appDataDir: string }) {
                 className="py-2 px-[18px] bg-[var(--accent)] border-none rounded-[7px] text-black font-sans text-[13px] font-bold cursor-pointer transition-all hover:bg-[#00ffaa] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? "Saving…" : saveFeedback ? "Saved" : "Save and reconnect"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-4 border-b border-[var(--border)] space-y-3">
+              <textarea
+                value={jsonText}
+                onChange={(e) => {
+                  setJsonText(e.target.value);
+                  if (jsonError) setJsonError(null);
+                }}
+                spellCheck={false}
+                rows={18}
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] rounded-[7px] py-2 px-3 text-[var(--text)] font-mono text-[12px] leading-[1.5] resize-y outline-none focus:border-[rgba(0,255,136,0.3)]"
+              />
+              {jsonError && (
+                <div className="text-[11px] text-[var(--red)] font-mono whitespace-pre-wrap">
+                  {jsonError}
+                </div>
+              )}
+              {!jsonError && jsonDirty && (
+                <div className="text-[11px] text-[var(--text-muted)] font-mono">
+                  Unsaved changes.
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2 py-4 px-4 border-t border-[var(--border)] flex-wrap">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleJsonReload}
+                  className="py-1.5 px-3 rounded-[7px] border border-[var(--border)] text-[var(--text)] font-sans text-[12px] cursor-pointer hover:bg-[var(--surface-3)]"
+                >
+                  Reload from disk
+                </button>
+                <button
+                  type="button"
+                  onClick={handleJsonFormat}
+                  className="py-1.5 px-3 rounded-[7px] border border-[var(--border)] text-[var(--text)] font-sans text-[12px] cursor-pointer hover:bg-[var(--surface-3)]"
+                >
+                  Format
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handleJsonSave}
+                disabled={jsonSaving}
+                className="py-2 px-[18px] bg-[var(--accent)] border-none rounded-[7px] text-black font-sans text-[13px] font-bold cursor-pointer transition-all hover:bg-[#00ffaa] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {jsonSaving ? "Saving…" : jsonSavedFlash ? "Saved" : "Save and reconnect"}
               </button>
             </div>
           </>

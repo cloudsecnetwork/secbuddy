@@ -281,7 +281,7 @@ For larger changes, please open an issue first to discuss the design.
 
 ## Security
 
-If you find a vulnerability in SecBuddy itself, please **do not** open a public issue. Email `security@cloudsecnetwork.com` (or the address listed in `SECURITY.md` if present) so we can triage and ship a fix before disclosure.
+If you find a vulnerability in SecBuddy itself, please **do not** open a public issue. Email `hello@cloudsecnetwork.com` (or the address listed in `SECURITY.md` if present) so we can triage and ship a fix before disclosure.
 
 ## License
 
