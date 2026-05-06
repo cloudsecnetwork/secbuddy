@@ -1,4 +1,4 @@
-﻿//! Integration test: run one full iteration of the rig orchestrator with
+//! Integration test: run one full iteration of the rig orchestrator with
 //! an OpenAI-compatible mocked endpoint and a real local tool. Asserts the
 //! event sequence and DB persistence match the documented contract.
 
@@ -132,9 +132,8 @@ async fn local_tool_full_loop_with_approval() {
     let dyn_sink = state.dyn_sink.clone();
 
     let pending_for_drive = pending.clone();
-    let drive = tokio::spawn(async move {
-        drive_all_approvals(&pending_for_drive, "approved", 1).await
-    });
+    let drive =
+        tokio::spawn(async move { drive_all_approvals(&pending_for_drive, "approved", 1).await });
 
     let result: Result<(), String> = rig_orchestrator::run_agent_loop(
         pool.clone(),
@@ -154,12 +153,36 @@ async fn local_tool_full_loop_with_approval() {
     let events = state.sink.snapshot();
     let kinds = event_types(&events);
 
-    assert!(kinds.contains(&"MessageChunk".to_string()), "no MessageChunk emitted: {:?}", kinds);
-    assert!(kinds.contains(&"MessageComplete".to_string()), "no MessageComplete: {:?}", kinds);
-    assert!(kinds.contains(&"ConfidencePreview".to_string()), "no ConfidencePreview: {:?}", kinds);
-    assert!(kinds.contains(&"ApprovalRequired".to_string()), "no ApprovalRequired: {:?}", kinds);
-    assert!(kinds.contains(&"ToolRunning".to_string()), "no ToolRunning: {:?}", kinds);
-    assert!(kinds.contains(&"ToolComplete".to_string()), "no ToolComplete: {:?}", kinds);
+    assert!(
+        kinds.contains(&"MessageChunk".to_string()),
+        "no MessageChunk emitted: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains(&"MessageComplete".to_string()),
+        "no MessageComplete: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains(&"ConfidencePreview".to_string()),
+        "no ConfidencePreview: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains(&"ApprovalRequired".to_string()),
+        "no ApprovalRequired: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains(&"ToolRunning".to_string()),
+        "no ToolRunning: {:?}",
+        kinds
+    );
+    assert!(
+        kinds.contains(&"ToolComplete".to_string()),
+        "no ToolComplete: {:?}",
+        kinds
+    );
 
     let approval_idx = kinds.iter().position(|k| k == "ApprovalRequired").unwrap();
     let running_idx = kinds.iter().position(|k| k == "ToolRunning").unwrap();
@@ -173,11 +196,7 @@ async fn local_tool_full_loop_with_approval() {
     assert_eq!(row.tool_name, "echotool");
     assert_eq!(row.tool_source, "local");
     assert_eq!(row.status, "complete");
-    assert!(row
-        .raw_output
-        .as_deref()
-        .unwrap_or("")
-        .contains("secbuddy"));
+    assert!(row.raw_output.as_deref().unwrap_or("").contains("secbuddy"));
 }
 
 #[tokio::test]
@@ -193,9 +212,8 @@ async fn local_tool_full_loop_with_dry_run() {
 
     let pool = state.pool.clone();
     let pending_for_drive = state.pending_approvals.clone();
-    let drive = tokio::spawn(async move {
-        drive_all_approvals(&pending_for_drive, "dry_run", 1).await
-    });
+    let drive =
+        tokio::spawn(async move { drive_all_approvals(&pending_for_drive, "dry_run", 1).await });
 
     let result: Result<(), String> = rig_orchestrator::run_agent_loop(
         pool.clone(),
@@ -216,7 +234,10 @@ async fn local_tool_full_loop_with_dry_run() {
     let kinds = event_types(&events);
     assert!(kinds.contains(&"ApprovalRequired".to_string()));
     assert!(kinds.contains(&"ToolComplete".to_string()));
-    assert!(!kinds.contains(&"ToolRunning".to_string()), "dry_run should skip ToolRunning");
+    assert!(
+        !kinds.contains(&"ToolRunning".to_string()),
+        "dry_run should skip ToolRunning"
+    );
 
     let invocations = secbuddy_lib::test_support::query_invocations(&pool, "chat-2").await;
     assert_eq!(invocations.len(), 1);
@@ -236,9 +257,8 @@ async fn local_tool_full_loop_with_denial() {
 
     let pool = state.pool.clone();
     let pending_for_drive = state.pending_approvals.clone();
-    let drive = tokio::spawn(async move {
-        drive_all_approvals(&pending_for_drive, "denied", 1).await
-    });
+    let drive =
+        tokio::spawn(async move { drive_all_approvals(&pending_for_drive, "denied", 1).await });
 
     let result: Result<(), String> = rig_orchestrator::run_agent_loop(
         pool.clone(),
@@ -257,11 +277,17 @@ async fn local_tool_full_loop_with_denial() {
 
     let events = state.sink.snapshot();
     let kinds = event_types(&events);
-    assert!(kinds.contains(&"ToolDenied".to_string()), "no ToolDenied: {:?}", kinds);
-    assert!(!kinds.contains(&"ToolRunning".to_string()), "denial should skip ToolRunning");
+    assert!(
+        kinds.contains(&"ToolDenied".to_string()),
+        "no ToolDenied: {:?}",
+        kinds
+    );
+    assert!(
+        !kinds.contains(&"ToolRunning".to_string()),
+        "denial should skip ToolRunning"
+    );
 
     let invocations = secbuddy_lib::test_support::query_invocations(&pool, "chat-3").await;
     assert_eq!(invocations.len(), 1);
     assert_eq!(invocations[0].status, "denied");
 }
-

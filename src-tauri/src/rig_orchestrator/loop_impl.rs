@@ -10,16 +10,14 @@ use crate::evidence;
 use crate::governance;
 use crate::llm_client::{self, LlmProvider};
 use crate::prompts;
-use crate::rig_orchestrator::definitions::{
-    build_tool_definitions, REPORT_FINDING_TOOL_NAME,
-};
+use crate::rig_orchestrator::definitions::{build_tool_definitions, REPORT_FINDING_TOOL_NAME};
 use crate::rig_orchestrator::events;
 use crate::rig_orchestrator::provider::RigChatModel;
 use crate::tool_registry::{ToolInfo, ToolRegistry};
 use crate::tool_runner;
-use rig::OneOrMany;
 use rig::completion::message::{AssistantContent, Message};
 use rig::completion::CompletionRequest;
+use rig::OneOrMany;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
@@ -139,8 +137,16 @@ fn build_tool_context(tools: &ToolRegistry) -> String {
 
 fn parse_tool_args(args_json: &str) -> (String, String) {
     let v: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
-    let args = v.get("args").and_then(Value::as_str).unwrap_or("").to_string();
-    let target = v.get("target").and_then(Value::as_str).unwrap_or("").to_string();
+    let args = v
+        .get("args")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let target = v
+        .get("target")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     (args, target)
 }
 
@@ -179,9 +185,7 @@ fn phase_from_tool_names(tools: &ToolRegistry, tool_names: &[String]) -> Option<
 /// Convert our DB-backed messages into Rig's `Message` enum. Tool-result
 /// rows arrive as `role = "tool"` and are remapped to user-role messages
 /// with a "[Tool result]\n..." prefix (handled in `context::format_message_for_llm`).
-fn db_messages_to_rig(
-    api_messages: &[Value],
-) -> Result<(Option<String>, Vec<Message>), String> {
+fn db_messages_to_rig(api_messages: &[Value]) -> Result<(Option<String>, Vec<Message>), String> {
     let mut preamble: Option<String> = None;
     let mut history: Vec<Message> = Vec::new();
     for m in api_messages {
@@ -416,7 +420,13 @@ pub async fn run_agent_loop(
                 let risk_cat = tools.risk_category(&tc.name);
                 let requires_approval =
                     governance::requires_approval(&execution_mode, &risk_cat, multi_tool_batch);
-                events::execution_plan_entry(&tc.name, &args_str, &target, &risk_cat, requires_approval)
+                events::execution_plan_entry(
+                    &tc.name,
+                    &args_str,
+                    &target,
+                    &risk_cat,
+                    requires_approval,
+                )
             })
             .collect();
 
@@ -469,7 +479,10 @@ pub async fn run_agent_loop(
                             );
                         }
                         if let Err(e) = context::add_finding_to_battle_map(
-                            &pool, &chat_id, &f.title, &f.severity,
+                            &pool,
+                            &chat_id,
+                            &f.title,
+                            &f.severity,
                         )
                         .await
                         {
@@ -570,17 +583,12 @@ pub async fn run_agent_loop(
             }
         }
 
-        for (
-            invocation_id,
-            rx,
-            tool_name,
-            target,
-            args_str,
-            risk_category,
-            real_idx,
-        ) in pending_approval_rxs
+        for (invocation_id, rx, tool_name, target, args_str, risk_category, real_idx) in
+            pending_approval_rxs
         {
-            let decision = rx.await.map_err(|_| "Approval channel closed".to_string())?;
+            let decision = rx
+                .await
+                .map_err(|_| "Approval channel closed".to_string())?;
             let tool_call_index = real_indices[real_idx];
 
             let approval_id = Uuid::new_v4().to_string();
@@ -615,14 +623,17 @@ pub async fn run_agent_loop(
                 if let Err(e) = context::mark_tool_skipped(&pool, &chat_id, &tool_name).await {
                     log::error!("[battle_map] skipped-tool update failed: {}", e);
                 }
-                ordered_tool_results[tool_call_index] =
-                    ("Tool denied by user.".to_string(), Some(invocation_id.clone()));
+                ordered_tool_results[tool_call_index] = (
+                    "Tool denied by user.".to_string(),
+                    Some(invocation_id.clone()),
+                );
                 continue;
             }
 
             if decision == "dry_run" {
-                let cmd_preview =
-                    format!("{} {} {}", tool_name, args_str, target).trim().to_string();
+                let cmd_preview = format!("{} {} {}", tool_name, args_str, target)
+                    .trim()
+                    .to_string();
                 let skip_message = format!(
                     "Tool: {}\nCommand: {}\nStatus: SKIPPED by user\nInstruction: Do not request this tool again in this session. Continue your analysis without {} output.",
                     tool_name, cmd_preview, tool_name
@@ -680,11 +691,9 @@ pub async fn run_agent_loop(
             let args = item.args_str.clone();
 
             if tools.is_mcp_tool(&item.tool_name) {
-                let server_name = tools
-                    .get_mcp_server_name(&item.tool_name)
-                    .ok_or_else(|| {
-                        format!("MCP server name unknown for tool: {}", item.tool_name)
-                    })?;
+                let server_name = tools.get_mcp_server_name(&item.tool_name).ok_or_else(|| {
+                    format!("MCP server name unknown for tool: {}", item.tool_name)
+                })?;
                 let mcp_runtime_clone = mcp_runtime.clone();
                 let timeout = tool_timeout_secs;
                 let handle = tokio::spawn(async move {
@@ -745,10 +754,10 @@ pub async fn run_agent_loop(
                     )
                     .await
                 });
-                running_handles
-                    .lock()
-                    .await
-                    .insert(item.invocation_id.clone(), (Some(cancel_tx), handle, pid_holder));
+                running_handles.lock().await.insert(
+                    item.invocation_id.clone(),
+                    (Some(cancel_tx), handle, pid_holder),
+                );
             }
         }
 
@@ -804,9 +813,14 @@ pub async fn run_agent_loop(
                 ),
             );
 
-            if let Err(e) =
-                context::update_battle_map(&pool, &chat_id, &item.tool_name, &item.target, output_str)
-                    .await
+            if let Err(e) = context::update_battle_map(
+                &pool,
+                &chat_id,
+                &item.tool_name,
+                &item.target,
+                output_str,
+            )
+            .await
             {
                 log::error!("[battle_map] update failed for {}: {}", item.tool_name, e);
             }
@@ -839,4 +853,3 @@ pub async fn run_agent_loop(
 
     Ok(())
 }
-

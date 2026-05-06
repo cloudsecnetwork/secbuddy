@@ -181,17 +181,11 @@ mod normalized_base_url_tests {
     #[test]
     fn openai_stale_ollama_host_is_cleared() {
         assert_eq!(
-            normalized_llm_base_url(
-                "openai",
-                Some("http://localhost:11434".to_string())
-            ),
+            normalized_llm_base_url("openai", Some("http://localhost:11434".to_string())),
             ""
         );
         assert_eq!(
-            normalized_llm_base_url(
-                "openai",
-                Some("http://127.0.0.1:11434/".to_string())
-            ),
+            normalized_llm_base_url("openai", Some("http://127.0.0.1:11434/".to_string())),
             ""
         );
     }

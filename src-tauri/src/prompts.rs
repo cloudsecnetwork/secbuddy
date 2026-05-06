@@ -15,21 +15,12 @@ pub fn build_system_prompt(mode: &str, tool_context: &str, battle_map: Option<&s
     if bm.is_empty() {
         format!(
             "{}\n\n{}\n\n{}\n\n{}\n\n{}",
-            BASE_IDENTITY,
-            mode_patch,
-            tool_context,
-            EXECUTION_RULES,
-            FINDINGS_PROTOCOL,
+            BASE_IDENTITY, mode_patch, tool_context, EXECUTION_RULES, FINDINGS_PROTOCOL,
         )
     } else {
         format!(
             "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
-            bm,
-            BASE_IDENTITY,
-            mode_patch,
-            tool_context,
-            EXECUTION_RULES,
-            FINDINGS_PROTOCOL,
+            bm, BASE_IDENTITY, mode_patch, tool_context, EXECUTION_RULES, FINDINGS_PROTOCOL,
         )
     }
 }

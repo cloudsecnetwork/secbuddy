@@ -10,7 +10,12 @@ pub fn now_ms() -> i64 {
 }
 
 // ---- Chats ----
-pub async fn create_chat(pool: &SqlitePool, id: &str, title: &str, mode: &str) -> Result<(), sqlx::Error> {
+pub async fn create_chat(
+    pool: &SqlitePool,
+    id: &str,
+    title: &str,
+    mode: &str,
+) -> Result<(), sqlx::Error> {
     let now = now_ms();
     sqlx::query(
         "INSERT INTO chats (id, title, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -25,7 +30,10 @@ pub async fn create_chat(pool: &SqlitePool, id: &str, title: &str, mode: &str) -
     Ok(())
 }
 
-pub async fn get_chat_title(pool: &SqlitePool, chat_id: &str) -> Result<Option<String>, sqlx::Error> {
+pub async fn get_chat_title(
+    pool: &SqlitePool,
+    chat_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query_scalar::<_, String>("SELECT title FROM chats WHERE id = ?")
         .bind(chat_id)
         .fetch_optional(pool)
@@ -33,7 +41,10 @@ pub async fn get_chat_title(pool: &SqlitePool, chat_id: &str) -> Result<Option<S
     Ok(row)
 }
 
-pub async fn list_chats(pool: &SqlitePool, limit: i32) -> Result<Vec<(String, String, String, i64)>, sqlx::Error> {
+pub async fn list_chats(
+    pool: &SqlitePool,
+    limit: i32,
+) -> Result<Vec<(String, String, String, i64)>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (String, String, String, i64)>(
         "SELECT id, title, mode, updated_at FROM chats ORDER BY updated_at DESC LIMIT ?",
     )
@@ -44,7 +55,10 @@ pub async fn list_chats(pool: &SqlitePool, limit: i32) -> Result<Vec<(String, St
 }
 
 #[allow(dead_code)]
-pub async fn get_chat_mode(pool: &SqlitePool, chat_id: &str) -> Result<Option<String>, sqlx::Error> {
+pub async fn get_chat_mode(
+    pool: &SqlitePool,
+    chat_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query_scalar::<_, String>("SELECT mode FROM chats WHERE id = ?")
         .bind(chat_id)
         .fetch_optional(pool)
@@ -62,7 +76,11 @@ pub async fn update_chat_updated(pool: &SqlitePool, chat_id: &str) -> Result<(),
 }
 
 #[allow(dead_code)]
-pub async fn update_chat_title(pool: &SqlitePool, chat_id: &str, title: &str) -> Result<(), sqlx::Error> {
+pub async fn update_chat_title(
+    pool: &SqlitePool,
+    chat_id: &str,
+    title: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE chats SET title = ?, updated_at = ? WHERE id = ?")
         .bind(title)
         .bind(now_ms())
@@ -73,7 +91,11 @@ pub async fn update_chat_title(pool: &SqlitePool, chat_id: &str, title: &str) ->
 }
 
 #[allow(dead_code)]
-pub async fn update_chat_mode(pool: &SqlitePool, chat_id: &str, mode: &str) -> Result<(), sqlx::Error> {
+pub async fn update_chat_mode(
+    pool: &SqlitePool,
+    chat_id: &str,
+    mode: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE chats SET mode = ?, updated_at = ? WHERE id = ?")
         .bind(mode)
         .bind(now_ms())
@@ -188,7 +210,11 @@ pub async fn update_tool_invocation_result(
     Ok(())
 }
 
-pub async fn update_tool_invocation_status(pool: &SqlitePool, id: &str, status: &str) -> Result<(), sqlx::Error> {
+pub async fn update_tool_invocation_status(
+    pool: &SqlitePool,
+    id: &str,
+    status: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE tool_invocations SET status = ? WHERE id = ?")
         .bind(status)
         .bind(id)
@@ -198,7 +224,10 @@ pub async fn update_tool_invocation_status(pool: &SqlitePool, id: &str, status: 
 }
 
 /// Mark any tool invocations still 'running' for this chat as failed (e.g. after app restart).
-pub async fn fix_stale_running_for_chat(pool: &SqlitePool, chat_id: &str) -> Result<(), sqlx::Error> {
+pub async fn fix_stale_running_for_chat(
+    pool: &SqlitePool,
+    chat_id: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE tool_invocations SET status = 'failed', raw_output = 'Interrupted by app restart.' WHERE chat_id = ? AND status = 'running'",
     )
@@ -209,7 +238,10 @@ pub async fn fix_stale_running_for_chat(pool: &SqlitePool, chat_id: &str) -> Res
 }
 
 /// Look up the chat_id that owns a given tool invocation.
-pub async fn get_chat_id_for_invocation(pool: &SqlitePool, invocation_id: &str) -> Result<Option<String>, sqlx::Error> {
+pub async fn get_chat_id_for_invocation(
+    pool: &SqlitePool,
+    invocation_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar::<_, String>("SELECT chat_id FROM tool_invocations WHERE id = ?")
         .bind(invocation_id)
         .fetch_optional(pool)
@@ -217,7 +249,11 @@ pub async fn get_chat_id_for_invocation(pool: &SqlitePool, invocation_id: &str) 
 }
 
 /// Mark all pending/running invocations for a chat as failed. Returns the IDs that were stopped.
-pub async fn stop_all_active_for_chat(pool: &SqlitePool, chat_id: &str, message: &str) -> Result<Vec<String>, sqlx::Error> {
+pub async fn stop_all_active_for_chat(
+    pool: &SqlitePool,
+    chat_id: &str,
+    message: &str,
+) -> Result<Vec<String>, sqlx::Error> {
     let ids = sqlx::query_scalar::<_, String>(
         "SELECT id FROM tool_invocations WHERE chat_id = ? AND status IN ('pending', 'running')",
     )
@@ -240,25 +276,25 @@ pub async fn stop_all_active_for_chat(pool: &SqlitePool, chat_id: &str, message:
 pub async fn get_tool_invocations_for_chat(
     pool: &SqlitePool,
     chat_id: &str,
-) ->     Result<
-        Vec<(
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<i32>,
-            Option<i64>,
-            Option<String>,
-            String,
-            Option<String>,
-            Option<String>,
-            i64,
-        )>,
-        sqlx::Error,
-    > {
+) -> Result<
+    Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<i32>,
+        Option<i64>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        i64,
+    )>,
+    sqlx::Error,
+> {
     let rows = sqlx::query_as::<_, (
         String,
         String,
@@ -460,7 +496,10 @@ pub async fn get_findings_for_chat(
 // }
 
 // ---- Battle Map ----
-pub async fn get_battle_map(pool: &SqlitePool, chat_id: &str) -> Result<Option<String>, sqlx::Error> {
+pub async fn get_battle_map(
+    pool: &SqlitePool,
+    chat_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query_scalar::<_, Option<String>>("SELECT battle_map FROM chats WHERE id = ?")
         .bind(chat_id)
         .fetch_optional(pool)
@@ -468,7 +507,11 @@ pub async fn get_battle_map(pool: &SqlitePool, chat_id: &str) -> Result<Option<S
     Ok(row.flatten())
 }
 
-pub async fn update_battle_map(pool: &SqlitePool, chat_id: &str, json_str: &str) -> Result<(), sqlx::Error> {
+pub async fn update_battle_map(
+    pool: &SqlitePool,
+    chat_id: &str,
+    json_str: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE chats SET battle_map = ? WHERE id = ?")
         .bind(json_str)
         .bind(chat_id)
