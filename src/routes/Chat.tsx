@@ -134,7 +134,7 @@ export function Chat() {
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     nearBottomRef.current = isNearBottom(el);
-    setShowJumpToLatest((prev) => (nearBottomRef.current ? false : true));
+    setShowJumpToLatest(!nearBottomRef.current);
   };
 
   // When user sends a message: scroll to latest immediately.
