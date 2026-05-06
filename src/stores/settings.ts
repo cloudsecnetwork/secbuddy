@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { OLLAMA_DEFAULT_BASE_URL, coalesceLlmBaseUrlForProvider } from "../constants/llm";
 import {
   getSetting,
   getAppDataDir,
@@ -51,7 +52,7 @@ function executionModeFromThreshold(threshold: string | null): ExecutionMode {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   llmProvider: "ollama",
   llmApiKey: "",
-  llmBaseUrl: "http://localhost:11434",
+  llmBaseUrl: OLLAMA_DEFAULT_BASE_URL,
   llmModel: "llama3.2",
   executionMode: "guided",
   toolTimeoutMinutes: 15,
@@ -82,10 +83,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await deleteSetting("approval_threshold");
     }
     const parsedTimeout = parseInt(toolTimeout ?? "", 10);
+    const resolvedProvider = provider ?? "ollama";
     set({
-      llmProvider: provider ?? "ollama",
+      llmProvider: resolvedProvider,
       llmApiKey: apiKey ?? "",
-      llmBaseUrl: baseUrl ?? "http://localhost:11434",
+      llmBaseUrl: coalesceLlmBaseUrlForProvider(resolvedProvider, baseUrl),
       llmModel: model ?? "llama3.2",
       executionMode: mode,
       toolTimeoutMinutes: Number.isNaN(parsedTimeout) || parsedTimeout < 1 ? 15 : parsedTimeout,

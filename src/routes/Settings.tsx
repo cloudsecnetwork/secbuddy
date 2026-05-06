@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { LLM_PROVIDERS, isProviderId } from "../constants/llm";
+import { LLM_PROVIDERS, defaultLlmBaseUrl, isProviderId } from "../constants/llm";
 import { useModelsConfigStore } from "../stores/modelsConfig";
 import { saveSetting, clearAllChatHistory, getMcpConfig, saveMcpConfig, testMcpServer } from "../lib/tauri";
 import type { McpConfig, McpServerEntry } from "../lib/tauri";
@@ -578,6 +578,9 @@ export function Settings() {
                         if (!isProviderId(value)) return;
                         setLlmProvider(value);
                         save("llm_provider", value);
+                        const nextBase = defaultLlmBaseUrl(value);
+                        setLlmBaseUrl(nextBase);
+                        save("llm_base_url", nextBase);
                         const defaultModelId = manifest.providers[value]?.defaultModelId ?? "llama3.2";
                         setLlmModel(defaultModelId);
                         save("llm_model", defaultModelId);

@@ -8,7 +8,7 @@ use crate::db;
 use crate::event_sink::EventSink;
 use crate::evidence;
 use crate::governance;
-use crate::llm_client;
+use crate::llm_client::{self, LlmProvider};
 use crate::prompts;
 use crate::rig_orchestrator::definitions::{
     build_tool_definitions, REPORT_FINDING_TOOL_NAME,
@@ -325,6 +325,13 @@ pub async fn run_agent_loop(
             );
         }
 
+        // rig-core Gemini maps `additional_params` onto `AdditionalParameters`, which
+        // requires `generationConfig` in JSON; `None` becomes `{}` and fails to deserialize.
+        let additional_params = match config.provider {
+            LlmProvider::Gemini => Some(json!({ "generationConfig": {} })),
+            _ => None,
+        };
+
         let request = CompletionRequest {
             preamble,
             chat_history: OneOrMany::many([rig_history, vec![prompt_msg]].concat())
@@ -334,7 +341,7 @@ pub async fn run_agent_loop(
             temperature: None,
             max_tokens: None,
             tool_choice: None,
-            additional_params: None,
+            additional_params,
         };
 
         let assistant_items = chat_model
