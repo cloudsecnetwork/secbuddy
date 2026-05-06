@@ -21,9 +21,9 @@ and marks the GitHub Release accordingly.
 
 A release **must** bump the version in all three files in lockstep:
 
-1. [`package.json`](../package.json) — `"version"`
-2. [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) — `"version"`
-3. [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) — `[package].version`
+1. [`package.json`](../package.json) - `"version"`
+2. [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) - `"version"`
+3. [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) - `[package].version`
 
 ## Release flow
 
@@ -69,12 +69,13 @@ Get review, merge to `main`.
 git checkout main
 git pull --ff-only
 git tag -a v0.2.0 -m "SecBuddy v0.2.0"
+git push origin main
 git push origin v0.2.0
 ```
 
 The push triggers `.github/workflows/release.yml`, which:
 
-- Builds on `windows-latest`, `macos-latest` (twice — `aarch64` and `x86_64`), and `ubuntu-22.04`.
+- Builds on `windows-latest` and `ubuntu-22.04`.
 - Bundles `.exe` / `.msi` / `.dmg` / `.AppImage` / `.deb` / `.rpm`.
 - Creates a **draft** GitHub Release at the tag and uploads every artifact.
 
@@ -86,7 +87,7 @@ Download each installer from the draft release and verify on a clean machine
 (or VM) per platform:
 
 - **Windows**: NSIS installer launches, app opens, Settings → Test connection works.
-- **macOS aarch64 + x86_64**: DMG mounts, app drags into Applications, first-launch Gatekeeper bypass works, Settings → Test connection works.
+<!-- - **macOS aarch64 + x86_64**: DMG mounts, app drags into Applications, first-launch Gatekeeper bypass works, Settings → Test connection works. -->
 - **Linux**: AppImage runs, deb installs cleanly on Ubuntu, rpm installs cleanly on Fedora.
 
 ### 7. Publish
@@ -102,6 +103,7 @@ In the GitHub Releases UI:
 - Pin the release in the repo description if desired.
 - Post to wherever your community lives.
 
+<!--
 ## Code signing & notarization (optional but recommended)
 
 The release workflow already plumbs the right environment variables through
@@ -120,8 +122,9 @@ Required secrets:
 | `APPLE_PASSWORD`             | App-specific password generated at appleid.apple.com.                     |
 | `APPLE_TEAM_ID`              | Apple Developer team ID.                                                  |
 
-Without these, macOS builds still ship — they're just unsigned, and users have
+Without these, macOS builds still ship - they are just unsigned, and users have
 to right-click → Open the first time.
+-->
 
 ### Windows
 
@@ -180,5 +183,5 @@ If a release is broken:
 2. Open an issue describing what went wrong.
 3. Cut a `.N+1` patch with the fix.
 
-Do not silently re-upload assets to the same tag — clients that already
+Do not silently re-upload assets to the same tag - clients that already
 downloaded the bad build won't get the fix.

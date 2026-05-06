@@ -1,7 +1,7 @@
 name: CI
 
 # Fast feedback for PRs and pushes to main: typecheck the frontend, lint and
-# unit-test the Rust backend, and verify the Tauri app builds on each OS.
+# unit-test the Rust backend, and verify the Tauri app builds on supported OSes.
 # This does NOT publish artifacts — see release.yml for that.
 
 on:
@@ -77,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        platform: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
