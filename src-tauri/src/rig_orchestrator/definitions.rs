@@ -65,7 +65,8 @@ pub fn report_finding_definition() -> ToolDefinition {
             "Report a security finding from your analysis. Call this when tool output or context \
              clearly indicates a finding (e.g. open risky port, certificate issue, \
              misconfiguration). Only report findings that are directly supported by the evidence. \
-             Use severity: low, medium, high, or critical.".to_string(),
+             Use severity: low, medium, high, or critical."
+                .to_string(),
         parameters: json!({
             "type": "object",
             "properties": {

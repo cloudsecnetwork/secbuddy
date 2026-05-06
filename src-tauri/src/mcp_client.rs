@@ -153,20 +153,14 @@ impl McpRuntime {
             }
         });
         let line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
-        let stdin = conn
-            .child
-            .stdin
-            .as_mut()
-            .ok_or("Server stdin closed")?;
-        stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+        let stdin = conn.child.stdin.as_mut().ok_or("Server stdin closed")?;
+        stdin
+            .write_all(line.as_bytes())
+            .map_err(|e| e.to_string())?;
         stdin.write_all(b"\n").map_err(|e| e.to_string())?;
         stdin.flush().map_err(|e| e.to_string())?;
 
-        let stdout = conn
-            .child
-            .stdout
-            .as_mut()
-            .ok_or("Server stdout closed")?;
+        let stdout = conn.child.stdout.as_mut().ok_or("Server stdout closed")?;
         let mut reader = BufReader::new(stdout);
         let mut response_line = String::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);

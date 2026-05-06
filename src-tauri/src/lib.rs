@@ -4,8 +4,8 @@ mod db;
 mod event_sink;
 mod evidence;
 mod governance;
-mod mcp_client;
 mod llm_client;
+mod mcp_client;
 mod prompts;
 #[doc(hidden)]
 pub mod rig_orchestrator;
@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 // use sha2::Digest; // only used by attach_file_to_chat (commented out)
-use tokio::sync::oneshot;
 use tauri::{Emitter, Manager};
+use tokio::sync::oneshot;
 use tool_registry::ToolRegistry;
 use tool_runner::ToolResult;
 
@@ -41,7 +41,8 @@ pub struct AppState {
     /// invocation_id -> (cancel_tx, JoinHandle, pid). Sending on cancel_tx kills the tool's child process.
     pub running_tool_handles: Arc<tokio::sync::Mutex<HashMap<String, RunningToolEntry>>>,
     /// chat_id -> JoinHandle for the agent loop task. Used to abort the entire session.
-    pub active_agent_loops: Arc<tokio::sync::Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
+    pub active_agent_loops:
+        Arc<tokio::sync::Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 #[tauri::command]
@@ -54,11 +55,7 @@ fn get_app_data_dir(state: tauri::State<AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_setting(
-    state: tauri::State<AppState>,
-    key: String,
-    value: String,
-) -> Result<(), String> {
+fn save_setting(state: tauri::State<AppState>, key: String, value: String) -> Result<(), String> {
     tauri::async_runtime::block_on(async move {
         db::save_setting(&state.db, &key, &value)
             .await
@@ -253,7 +250,15 @@ fn send_message(
         if let Err(e) = result {
             let error_msg_id = uuid::Uuid::new_v4().to_string();
             let error_content = format!("[error] {}", e);
-            let _ = db::insert_message(&pool_err, &error_msg_id, &chat_id_err, "assistant", &error_content, None).await;
+            let _ = db::insert_message(
+                &pool_err,
+                &error_msg_id,
+                &chat_id_err,
+                "assistant",
+                &error_content,
+                None,
+            )
+            .await;
             let _ = app_handle_emit.emit(
                 "chat_event",
                 serde_json::json!({ "type": "Error", "message": e, "message_id": error_msg_id }),
@@ -277,7 +282,8 @@ fn record_approval_and_execute(
         .unwrap()
         .remove(&invocation_id)
         .ok_or_else(|| "No pending approval for this invocation".to_string())?;
-    tx.send(decision).map_err(|_| "Failed to send decision".to_string())?;
+    tx.send(decision)
+        .map_err(|_| "Failed to send decision".to_string())?;
     Ok(())
 }
 
@@ -344,20 +350,25 @@ async fn cancel_tool_invocation(
     }
 
     // 7. Tell the UI the agent has stopped so it clears the waiting/loading state.
-    let _ = state.app_handle.emit(
-        "chat_event",
-        serde_json::json!({ "type": "AgentStopped" }),
-    );
+    let _ = state
+        .app_handle
+        .emit("chat_event", serde_json::json!({ "type": "AgentStopped" }));
 
     Ok(())
 }
 
 #[tauri::command]
-fn create_chat(state: tauri::State<AppState>, title: String, mode: Option<String>) -> Result<String, String> {
+fn create_chat(
+    state: tauri::State<AppState>,
+    title: String,
+    mode: Option<String>,
+) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let mode_value = mode.as_deref().unwrap_or("recon");
     tauri::async_runtime::block_on(async move {
-        db::create_chat(&state.db, &id, &title, mode_value).await.map_err(|e| e.to_string())?;
+        db::create_chat(&state.db, &id, &title, mode_value)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(id)
     })
 }
@@ -365,7 +376,9 @@ fn create_chat(state: tauri::State<AppState>, title: String, mode: Option<String
 #[tauri::command]
 fn list_chats(state: tauri::State<AppState>) -> Result<Vec<(String, String, String, i64)>, String> {
     tauri::async_runtime::block_on(async move {
-        db::list_chats(&state.db, 50).await.map_err(|e| e.to_string())
+        db::list_chats(&state.db, 50)
+            .await
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -375,8 +388,12 @@ fn get_chat_info(
     chat_id: String,
 ) -> Result<(Option<String>, Option<String>), String> {
     tauri::async_runtime::block_on(async move {
-        let title = db::get_chat_title(&state.db, &chat_id).await.map_err(|e| e.to_string())?;
-        let mode = db::get_chat_mode(&state.db, &chat_id).await.map_err(|e| e.to_string())?;
+        let title = db::get_chat_title(&state.db, &chat_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mode = db::get_chat_mode(&state.db, &chat_id)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok((title, mode))
     })
 }
@@ -387,7 +404,9 @@ fn get_chat_history(
     chat_id: String,
 ) -> Result<Vec<(String, String, String, String, Option<String>, i64)>, String> {
     tauri::async_runtime::block_on(async move {
-        db::get_chat_messages(&state.db, &chat_id).await.map_err(|e| e.to_string())
+        db::get_chat_messages(&state.db, &chat_id)
+            .await
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -454,14 +473,18 @@ fn get_findings_for_chat(
 #[tauri::command]
 fn delete_chat(state: tauri::State<AppState>, chat_id: String) -> Result<(), String> {
     tauri::async_runtime::block_on(async move {
-        db::delete_chat(&state.db, &chat_id).await.map_err(|e| e.to_string())
+        db::delete_chat(&state.db, &chat_id)
+            .await
+            .map_err(|e| e.to_string())
     })
 }
 
 #[tauri::command]
 fn clear_all_chat_history(state: tauri::State<AppState>) -> Result<(), String> {
     tauri::async_runtime::block_on(async move {
-        db::delete_all_chats(&state.db).await.map_err(|e| e.to_string())
+        db::delete_all_chats(&state.db)
+            .await
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -490,8 +513,10 @@ fn export_chat_html(state: tauri::State<AppState>, chat_id: String) -> Result<St
             .await
             .map_err(|e| e.to_string())?;
 
-        let mut inv_map: std::collections::HashMap<String, (String, String, Option<String>, String)> =
-            std::collections::HashMap::new();
+        let mut inv_map: std::collections::HashMap<
+            String,
+            (String, String, Option<String>, String),
+        > = std::collections::HashMap::new();
         for inv in &invocations {
             inv_map.insert(
                 inv.0.clone(),
@@ -550,9 +575,16 @@ h1{{font-size:1.25rem}}
                         escape_html(name)
                     ));
                     if phase.as_deref().unwrap_or("").len() > 0 {
-                        html.push_str(&format!(" [{}]", escape_html(phase.as_deref().unwrap_or(""))));
+                        html.push_str(&format!(
+                            " [{}]",
+                            escape_html(phase.as_deref().unwrap_or(""))
+                        ));
                     }
-                    html.push_str(&format!("<br/>Args: {}<br/><pre>{}</pre></div>\n", escape_html(params), escape_html(output)));
+                    html.push_str(&format!(
+                        "<br/>Args: {}<br/><pre>{}</pre></div>\n",
+                        escape_html(params),
+                        escape_html(output)
+                    ));
                 }
             }
         }
@@ -636,31 +668,31 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-        get_app_data_dir,
-        save_setting,
-        get_setting,
-        delete_setting,
-        list_tools,
-        refresh_local_tools,
-        test_connection,
-        get_mcp_config,
-        save_mcp_config,
-        reload_mcp_servers,
-        test_mcp_server,
-        send_message,
-        // attach_file_to_chat,
-        create_chat,
-        list_chats,
-        get_chat_info,
-        get_chat_history,
-        get_tool_invocations_for_chat,
-        get_findings_for_chat,
-        delete_chat,
-        clear_all_chat_history,
-        export_chat_html,
-        record_approval_and_execute,
-        cancel_tool_invocation
-    ])
+            get_app_data_dir,
+            save_setting,
+            get_setting,
+            delete_setting,
+            list_tools,
+            refresh_local_tools,
+            test_connection,
+            get_mcp_config,
+            save_mcp_config,
+            reload_mcp_servers,
+            test_mcp_server,
+            send_message,
+            // attach_file_to_chat,
+            create_chat,
+            list_chats,
+            get_chat_info,
+            get_chat_history,
+            get_tool_invocations_for_chat,
+            get_findings_for_chat,
+            delete_chat,
+            clear_all_chat_history,
+            export_chat_html,
+            record_approval_and_execute,
+            cancel_tool_invocation
+        ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| {

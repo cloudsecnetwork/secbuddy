@@ -101,11 +101,11 @@ pub struct RigTestState {
     pub pool: SqlitePool,
     pub tools: Arc<ToolRegistry>,
     pub mcp_runtime: Arc<McpRuntime>,
-    pub pending_approvals:
-        Arc<std::sync::RwLock<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>>,
-    pub running_handles: Arc<
-        tokio::sync::Mutex<std::collections::HashMap<String, crate::RunningToolEntry>>,
+    pub pending_approvals: Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>,
     >,
+    pub running_handles:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, crate::RunningToolEntry>>>,
     pub sink: CapturingSink,
     pub dyn_sink: Arc<dyn EventSink>,
 }
@@ -133,7 +133,11 @@ pub async fn spawn_state_for_test() -> RigTestState {
 pub fn event_types(events: &[Value]) -> Vec<String> {
     events
         .iter()
-        .filter_map(|e| e.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .filter_map(|e| {
+            e.get("type")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        })
         .collect()
 }
 
@@ -197,19 +201,29 @@ pub async fn drive_all_approvals(
 
 /// Seed a chat row so the orchestrator's DB writes have a parent.
 pub async fn seed_chat(pool: &SqlitePool, chat_id: &str) {
-    db::create_chat(pool, chat_id, "test-chat", "recon").await.unwrap();
+    db::create_chat(pool, chat_id, "test-chat", "recon")
+        .await
+        .unwrap();
 }
 
 /// Seed the LLM provider/base_url settings for a given mockito server.
 pub async fn seed_ollama_via_mockito(pool: &SqlitePool, base_url: &str) {
-    db::save_setting(pool, "llm_provider", "ollama").await.unwrap();
-    db::save_setting(pool, "llm_base_url", base_url).await.unwrap();
-    db::save_setting(pool, "llm_model", "llama3.2").await.unwrap();
+    db::save_setting(pool, "llm_provider", "ollama")
+        .await
+        .unwrap();
+    db::save_setting(pool, "llm_base_url", base_url)
+        .await
+        .unwrap();
+    db::save_setting(pool, "llm_model", "llama3.2")
+        .await
+        .unwrap();
 }
 
 /// Seed `execution_mode` so all approvals trigger via gating.
 pub async fn seed_execution_mode(pool: &SqlitePool, mode: &str) {
-    db::save_setting(pool, "execution_mode", mode).await.unwrap();
+    db::save_setting(pool, "execution_mode", mode)
+        .await
+        .unwrap();
 }
 
 /// Lightweight projection of `tool_invocations` rows for tests.
@@ -230,12 +244,14 @@ pub async fn query_invocations(pool: &SqlitePool, chat_id: &str) -> Vec<Invocati
     .await
     .unwrap();
     rows.into_iter()
-        .map(|(id, tool_name, tool_source, raw_output, status)| InvocationRow {
-            id,
-            tool_name,
-            tool_source,
-            raw_output,
-            status,
-        })
+        .map(
+            |(id, tool_name, tool_source, raw_output, status)| InvocationRow {
+                id,
+                tool_name,
+                tool_source,
+                raw_output,
+                status,
+            },
+        )
         .collect()
 }

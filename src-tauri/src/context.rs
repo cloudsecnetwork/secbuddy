@@ -59,7 +59,11 @@ pub fn render_battle_map(map: &BattleMap) -> String {
     let dns = if map.dns_records.is_empty() {
         "none".to_string()
     } else {
-        map.dns_records.iter().map(|r| xml_escape(r)).collect::<Vec<_>>().join(", ")
+        map.dns_records
+            .iter()
+            .map(|r| xml_escape(r))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     let tls = xml_escape(map.tls_info.as_deref().unwrap_or("none"));
@@ -67,7 +71,11 @@ pub fn render_battle_map(map: &BattleMap) -> String {
     let findings = if map.findings_summary.is_empty() {
         "none".to_string()
     } else {
-        map.findings_summary.iter().map(|f| xml_escape(f)).collect::<Vec<_>>().join(", ")
+        map.findings_summary
+            .iter()
+            .map(|f| xml_escape(f))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     let skipped = if map.skipped_tools.is_empty() {
@@ -76,7 +84,11 @@ pub fn render_battle_map(map: &BattleMap) -> String {
         map.skipped_tools.join(", ")
     };
 
-    let goal = xml_escape(map.current_goal.as_deref().unwrap_or("awaiting user request"));
+    let goal = xml_escape(
+        map.current_goal
+            .as_deref()
+            .unwrap_or("awaiting user request"),
+    );
 
     format!(
         "<battle_map>\n\
@@ -115,11 +127,7 @@ pub async fn build_battle_map_from_db(
 }
 
 /// Persist battle map JSON to DB.
-async fn save_battle_map(
-    pool: &SqlitePool,
-    chat_id: &str,
-    map: &BattleMap,
-) -> Result<(), String> {
+async fn save_battle_map(pool: &SqlitePool, chat_id: &str, map: &BattleMap) -> Result<(), String> {
     let json_str = serde_json::to_string(map).map_err(|e| e.to_string())?;
     db::update_battle_map(pool, chat_id, &json_str)
         .await
@@ -239,7 +247,8 @@ fn parse_nmap_into_map(map: &mut BattleMap, output: &str) {
 }
 
 fn parse_dig_into_map(map: &mut BattleMap, output: &str) {
-    let record_re = Regex::new(r"(?m)^\S+\.\s+\d+\s+IN\s+(A|AAAA|MX|NS|CNAME|TXT)\s+(.+)$").unwrap();
+    let record_re =
+        Regex::new(r"(?m)^\S+\.\s+\d+\s+IN\s+(A|AAAA|MX|NS|CNAME|TXT)\s+(.+)$").unwrap();
     for cap in record_re.captures_iter(output) {
         let rtype = &cap[1];
         let value = cap[2].trim().to_string();
@@ -285,7 +294,8 @@ fn parse_whois_into_map(map: &mut BattleMap, output: &str) {
         }
     }
 
-    let expiry_re = Regex::new(r"(?im)^(?:Registry\s+)?Expir(?:y|ation)\s*(?:Date)?\s*[=:]\s*(.+)$").unwrap();
+    let expiry_re =
+        Regex::new(r"(?im)^(?:Registry\s+)?Expir(?:y|ation)\s*(?:Date)?\s*[=:]\s*(.+)$").unwrap();
     if let Some(cap) = expiry_re.captures(output) {
         let entry = format!("Expires={}", cap[1].trim());
         if !map.dns_records.contains(&entry) {
@@ -305,7 +315,11 @@ fn parse_tls_into_map(map: &mut BattleMap, output: &str) {
     let expiry_re = Regex::new(r"(?i)(?:Not After|notAfter|expires?)\s*[=:]\s*(.+)").unwrap();
     if let Some(cap) = expiry_re.captures(output) {
         let expiry = cap[1].trim();
-        let short = if expiry.len() > 30 { &expiry[..floor_char_boundary(expiry, 30)] } else { expiry };
+        let short = if expiry.len() > 30 {
+            &expiry[..floor_char_boundary(expiry, 30)]
+        } else {
+            expiry
+        };
         parts.push(format!("expires={}", short));
     }
 

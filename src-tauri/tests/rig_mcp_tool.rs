@@ -1,4 +1,4 @@
-﻿//! Integration test: rig orchestrator dispatches MCP tool calls through
+//! Integration test: rig orchestrator dispatches MCP tool calls through
 //! `mcp_client::McpRuntime`. We register an MCP tool in the registry without
 //! a corresponding running server. The runtime returns a clean error which
 //! the orchestrator surfaces as `ToolComplete{status="failed"}`. This proves
@@ -76,9 +76,8 @@ async fn mcp_tool_dispatch_branch_runs_and_surfaces_failure() {
 
     let pool = state.pool.clone();
     let pending_for_drive = state.pending_approvals.clone();
-    let drive = tokio::spawn(async move {
-        drive_all_approvals(&pending_for_drive, "approved", 1).await
-    });
+    let drive =
+        tokio::spawn(async move { drive_all_approvals(&pending_for_drive, "approved", 1).await });
 
     let result: Result<(), String> = rig_orchestrator::run_agent_loop(
         pool.clone(),
@@ -99,14 +98,24 @@ async fn mcp_tool_dispatch_branch_runs_and_surfaces_failure() {
     let kinds = event_types(&events);
 
     assert!(kinds.contains(&"ApprovalRequired".to_string()));
-    assert!(kinds.contains(&"ToolRunning".to_string()), "MCP tool should still emit ToolRunning: {:?}", kinds);
+    assert!(
+        kinds.contains(&"ToolRunning".to_string()),
+        "MCP tool should still emit ToolRunning: {:?}",
+        kinds
+    );
     assert!(kinds.contains(&"ToolComplete".to_string()));
 
     let invocations = query_invocations(&pool, "chat-mcp-1").await;
     assert_eq!(invocations.len(), 1);
     assert_eq!(invocations[0].tool_name, "mcp_ping");
-    assert_eq!(invocations[0].tool_source, "mcp", "must take the MCP dispatch branch");
-    assert_eq!(invocations[0].status, "failed", "phantom server must fail cleanly");
+    assert_eq!(
+        invocations[0].tool_source, "mcp",
+        "must take the MCP dispatch branch"
+    );
+    assert_eq!(
+        invocations[0].status, "failed",
+        "phantom server must fail cleanly"
+    );
     let raw = invocations[0].raw_output.as_deref().unwrap_or("");
     assert!(
         raw.to_lowercase().contains("not connected") || raw.to_lowercase().contains("phantom"),
@@ -114,4 +123,3 @@ async fn mcp_tool_dispatch_branch_runs_and_surfaces_failure() {
         raw
     );
 }
-

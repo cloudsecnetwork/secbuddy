@@ -37,7 +37,10 @@ impl RigChatModel {
                     builder = builder.base_url(trimmed);
                 }
                 let client = builder.build();
-                let responses_model = <openai::Client as rig::client::CompletionClient>::completion_model(&client, model);
+                let responses_model =
+                    <openai::Client as rig::client::CompletionClient>::completion_model(
+                        &client, model,
+                    );
                 Ok(RigChatModel::OpenAi(responses_model.completions_api()))
             }
             LlmProvider::Ollama => {
@@ -45,10 +48,11 @@ impl RigChatModel {
                 let trimmed = config.base_url.trim_end_matches('/');
                 let oai_base = format!("{}/v1", trimmed);
                 let api_key = config.api_key.as_deref().unwrap_or("ollama");
-                let client = openai::Client::builder(api_key)
-                    .base_url(&oai_base)
-                    .build();
-                let responses_model = <openai::Client as rig::client::CompletionClient>::completion_model(&client, model);
+                let client = openai::Client::builder(api_key).base_url(&oai_base).build();
+                let responses_model =
+                    <openai::Client as rig::client::CompletionClient>::completion_model(
+                        &client, model,
+                    );
                 Ok(RigChatModel::OpenAi(responses_model.completions_api()))
             }
             LlmProvider::Claude => {
@@ -59,7 +63,9 @@ impl RigChatModel {
                 let client = anthropic::Client::builder(key)
                     .build()
                     .map_err(|e| format!("Anthropic client build failed: {}", e))?;
-                let model = <anthropic::Client as rig::client::CompletionClient>::completion_model(&client, model);
+                let model = <anthropic::Client as rig::client::CompletionClient>::completion_model(
+                    &client, model,
+                );
                 Ok(RigChatModel::Anthropic(model))
             }
             LlmProvider::Gemini => {
@@ -70,7 +76,9 @@ impl RigChatModel {
                 let client = gemini::Client::builder(key)
                     .build()
                     .map_err(|e| format!("Gemini client build failed: {}", e))?;
-                let model = <gemini::Client as rig::client::CompletionClient>::completion_model(&client, model);
+                let model = <gemini::Client as rig::client::CompletionClient>::completion_model(
+                    &client, model,
+                );
                 Ok(RigChatModel::Gemini(model))
             }
         }

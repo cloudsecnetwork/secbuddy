@@ -42,9 +42,18 @@ pub fn parse_finding_from_report_args(args_json: &str) -> Result<ExtractedFindin
         .and_then(|v| v.as_str())
         .ok_or("Missing or invalid 'description'")?
         .to_string();
-    let mitre_ref = obj.get("mitre_ref").and_then(|v| v.as_str()).map(String::from);
-    let owasp_ref = obj.get("owasp_ref").and_then(|v| v.as_str()).map(String::from);
-    let cwe_ref = obj.get("cwe_ref").and_then(|v| v.as_str()).map(String::from);
+    let mitre_ref = obj
+        .get("mitre_ref")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let owasp_ref = obj
+        .get("owasp_ref")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let cwe_ref = obj
+        .get("cwe_ref")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let recommended_action = obj
         .get("recommended_action")
         .and_then(|v| v.as_str())

@@ -125,13 +125,9 @@ impl ToolRegistry {
     /// Detect binary path: Windows = where, macOS/Linux = which.
     fn detect_binary(binary: &str) -> (Option<String>, bool) {
         let output = if cfg!(target_os = "windows") {
-            Command::new("where")
-                .arg(binary)
-                .output()
+            Command::new("where").arg(binary).output()
         } else {
-            Command::new("which")
-                .arg(binary)
-                .output()
+            Command::new("which").arg(binary).output()
         };
         match output {
             Ok(o) if o.status.success() => {

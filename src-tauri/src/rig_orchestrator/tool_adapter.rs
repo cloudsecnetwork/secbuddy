@@ -83,7 +83,9 @@ impl Tool for LocalToolAdapter {
             Ok(result.raw_output.unwrap_or_default())
         } else {
             Err(ToolAdapterError::Runtime(
-                result.raw_output.unwrap_or_else(|| "tool failed".to_string()),
+                result
+                    .raw_output
+                    .unwrap_or_else(|| "tool failed".to_string()),
             ))
         }
     }

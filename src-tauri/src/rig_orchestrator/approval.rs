@@ -71,10 +71,7 @@ mod tests {
         let rx = register_pending(&pending, "inv-1");
         let tx = pending.write().unwrap().remove("inv-1").unwrap();
         tx.send("approved".to_string()).unwrap();
-        assert_eq!(
-            await_decision(rx).await.unwrap(),
-            ApprovalOutcome::Approved
-        );
+        assert_eq!(await_decision(rx).await.unwrap(), ApprovalOutcome::Approved);
         assert!(pending.read().unwrap().is_empty());
     }
 
