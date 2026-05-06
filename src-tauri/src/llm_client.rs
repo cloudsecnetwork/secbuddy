@@ -33,6 +33,37 @@ impl LlmConfig {
     }
 }
 
+const OLLAMA_DEFAULT_BASE: &str = "http://localhost:11434";
+
+fn is_default_ollama_base(trimmed: &str) -> bool {
+    let root = trimmed.trim_end_matches('/');
+    let lower = root.to_ascii_lowercase();
+    lower == "http://localhost:11434" || lower == "http://127.0.0.1:11434"
+}
+
+/// Resolve `llm_base_url` for the active provider so cloud providers do not inherit
+/// Ollama's localhost default from the DB or from switching provider in the UI.
+fn normalized_llm_base_url(provider: &str, stored: Option<String>) -> String {
+    let raw = stored.unwrap_or_default();
+    let trim = raw.trim();
+    match provider.to_lowercase().as_str() {
+        "openai" | "claude" | "gemini" => {
+            if trim.is_empty() || is_default_ollama_base(trim) {
+                String::new()
+            } else {
+                trim.to_string()
+            }
+        }
+        _ => {
+            if trim.is_empty() {
+                OLLAMA_DEFAULT_BASE.to_string()
+            } else {
+                trim.to_string()
+            }
+        }
+    }
+}
+
 /// Load LLM config from DB settings.
 pub async fn get_llm_config_from_pool(pool: &SqlitePool) -> Result<LlmConfig, String> {
     let provider: String = db::get_setting(pool, "llm_provider")
@@ -41,11 +72,8 @@ pub async fn get_llm_config_from_pool(pool: &SqlitePool) -> Result<LlmConfig, St
         .flatten()
         .unwrap_or_else(|| "ollama".to_string());
     let api_key: Option<String> = db::get_setting(pool, "llm_api_key").await.ok().flatten();
-    let base_url: String = db::get_setting(pool, "llm_base_url")
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let stored_base = db::get_setting(pool, "llm_base_url").await.ok().flatten();
+    let base_url = normalized_llm_base_url(&provider, stored_base);
     let config = match provider.to_lowercase().as_str() {
         "claude" => LlmConfig {
             provider: LlmProvider::Claude,
@@ -130,5 +158,49 @@ pub async fn test_connection(config: &LlmConfig) -> Result<(), String> {
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod normalized_base_url_tests {
+    use super::normalized_llm_base_url;
+
+    #[test]
+    fn ollama_missing_uses_default() {
+        assert_eq!(
+            normalized_llm_base_url("ollama", None),
+            "http://localhost:11434"
+        );
+    }
+
+    #[test]
+    fn openai_missing_is_empty() {
+        assert_eq!(normalized_llm_base_url("openai", None), "");
+    }
+
+    #[test]
+    fn openai_stale_ollama_host_is_cleared() {
+        assert_eq!(
+            normalized_llm_base_url(
+                "openai",
+                Some("http://localhost:11434".to_string())
+            ),
+            ""
+        );
+        assert_eq!(
+            normalized_llm_base_url(
+                "openai",
+                Some("http://127.0.0.1:11434/".to_string())
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn openai_custom_proxy_kept() {
+        assert_eq!(
+            normalized_llm_base_url("openai", Some("https://example.com/v1".to_string())),
+            "https://example.com/v1"
+        );
     }
 }

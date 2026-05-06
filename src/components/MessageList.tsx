@@ -1,7 +1,8 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useChatStore } from "../stores/chat";
-import type { Message, ToolInvocation } from "../stores/chat";
+import type { Finding, Message, ToolInvocation } from "../stores/chat";
 import { ToolCard } from "./ToolCard";
 import { FindingCard } from "./FindingCard";
 
@@ -48,6 +49,35 @@ type MessageListProps = {
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 };
 
+/**
+ * `report_finding` findings are stored with no tool invocation id, same as plain
+ * assistant text messages. Matching with `===` would treat `null === null` as
+ * true for every assistant bubble, so every finding card repeats under each
+ * assistant message. Pin orphans to the assistant turn that preceded them in time.
+ */
+function messageIdForOrphanFinding(finding: Finding, messages: Message[]): string | null {
+  const assistants = messages.filter((m) => m.role === "assistant");
+  if (assistants.length === 0) return null;
+  let best: Message | null = null;
+  for (const m of assistants) {
+    if (m.createdAt <= finding.createdAt) {
+      best = m;
+    }
+  }
+  if (best) return best.id;
+  // Clock skew or finding loaded before its assistant row: avoid duplicating onto every bubble.
+  return assistants[0].id;
+}
+
+function findingsForAssistantMessage(msg: Message, messages: Message[], findings: Finding[]): Finding[] {
+  return findings.filter((f) => {
+    if (f.toolInvocationId != null) {
+      return f.toolInvocationId === msg.toolInvocationId;
+    }
+    return messageIdForOrphanFinding(f, messages) === msg.id;
+  });
+}
+
 export function MessageList({ scrollContainerRef, onScroll }: MessageListProps = {}) {
   const messages = useChatStore((s) => s.messages);
   const toolInvocations = useChatStore((s) => s.toolInvocations);
@@ -65,6 +95,16 @@ export function MessageList({ scrollContainerRef, onScroll }: MessageListProps =
       .filter((inv) => !linkedInvIds.has(inv.id))
       .map((inv) => ({ kind: "tool" as const, inv, ts: inv.createdAt })),
   ].sort((a, b) => a.ts - b.ts);
+
+  const assistantFindingsByMsgId = useMemo(() => {
+    const map = new Map<string, Finding[]>();
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      const list = findingsForAssistantMessage(msg, messages, findings);
+      if (list.length > 0) map.set(msg.id, list);
+    }
+    return map;
+  }, [messages, findings]);
 
   return (
     <div
@@ -134,11 +174,9 @@ export function MessageList({ scrollContainerRef, onScroll }: MessageListProps =
                   {msg.toolInvocationId && toolInvocations[msg.toolInvocationId] && (
                     <ToolCard inv={toolInvocations[msg.toolInvocationId]} />
                   )}
-                  {findings
-                    .filter((f) => f.toolInvocationId === msg.toolInvocationId)
-                    .map((f) => (
-                      <FindingCard key={f.id} finding={f} />
-                    ))}
+                  {(assistantFindingsByMsgId.get(msg.id) ?? []).map((f) => (
+                    <FindingCard key={f.id} finding={f} />
+                  ))}
                 </div>
               </div>
             )}
