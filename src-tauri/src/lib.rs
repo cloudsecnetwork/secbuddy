@@ -6,6 +6,7 @@ mod evidence;
 mod governance;
 mod llm_client;
 mod mcp_client;
+mod process_ext;
 mod prompts;
 #[doc(hidden)]
 pub mod rig_orchestrator;
