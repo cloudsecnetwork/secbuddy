@@ -29,13 +29,37 @@ pub struct McpServerEntry {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Free-form description shown in the UI; ignored by the runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Per-server tools/call timeout (seconds). Overrides the global tool timeout when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+    /// When true, the runtime skips this server during reload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
 }
 
-/// Load MCP config: from settings (pool) first; if missing, try mcp.json in app_data_dir and migrate into settings.
+/// Path to the canonical mcp.json under the app data directory.
+pub fn mcp_json_path(app_data_dir: &Path) -> std::path::PathBuf {
+    app_data_dir.join("mcp.json")
+}
+
+/// Load MCP config. `mcp.json` is authoritative when present so hand edits are picked up;
+/// the DB cache is used as a fallback when the file is missing or unreadable so startup
+/// still works on a freshly installed copy.
 pub async fn load_mcp_config(
     pool: &sqlx::SqlitePool,
     app_data_dir: &Path,
 ) -> Result<McpConfig, String> {
+    let mcp_path = mcp_json_path(app_data_dir);
+    if mcp_path.exists() {
+        let content = std::fs::read_to_string(&mcp_path).map_err(|e| e.to_string())?;
+        let config: McpConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        let cache = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+        let _ = crate::db::save_setting(pool, MCP_CONFIG_KEY, &cache).await;
+        return Ok(config);
+    }
     let from_db = crate::db::get_setting(pool, MCP_CONFIG_KEY)
         .await
         .map_err(|e| e.to_string())?;
@@ -43,37 +67,51 @@ pub async fn load_mcp_config(
         let config: McpConfig = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         return Ok(config);
     }
-    let mcp_path = app_data_dir.join("mcp.json");
-    if mcp_path.exists() {
-        let content = std::fs::read_to_string(&mcp_path).map_err(|e| e.to_string())?;
-        let config: McpConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-        if !config.mcp_servers.is_empty() {
-            let json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
-            crate::db::save_setting(pool, MCP_CONFIG_KEY, &json)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        return Ok(config);
-    }
     Ok(McpConfig::default())
 }
 
-/// Save MCP config to settings and optionally write mcp.json.
+/// Persist MCP config: pretty-write `mcp.json` (always) and refresh the DB cache.
+/// `_write_file` is retained for ABI stability; the file is always written now that
+/// `mcp.json` is the source of truth.
 pub async fn save_mcp_config(
     pool: &sqlx::SqlitePool,
     app_data_dir: &Path,
     config: &McpConfig,
-    write_file: bool,
+    _write_file: bool,
 ) -> Result<(), String> {
-    let json = serde_json::to_string(config).map_err(|e| e.to_string())?;
-    crate::db::save_setting(pool, MCP_CONFIG_KEY, &json)
+    let pretty = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    let mcp_path = mcp_json_path(app_data_dir);
+    if let Some(parent) = mcp_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&mcp_path, &pretty).map_err(|e| e.to_string())?;
+    let cache = serde_json::to_string(config).map_err(|e| e.to_string())?;
+    crate::db::save_setting(pool, MCP_CONFIG_KEY, &cache)
         .await
         .map_err(|e| e.to_string())?;
-    if write_file {
-        let mcp_path = app_data_dir.join("mcp.json");
-        std::fs::write(&mcp_path, &json).map_err(|e| e.to_string())?;
-    }
     Ok(())
+}
+
+/// Read the raw mcp.json text for the in-app JSON editor. Returns a default skeleton
+/// when the file does not yet exist so the editor always has something to render.
+pub fn read_mcp_json_text(app_data_dir: &Path) -> Result<String, String> {
+    let mcp_path = mcp_json_path(app_data_dir);
+    if !mcp_path.exists() {
+        return Ok("{\n  \"mcpServers\": {}\n}".to_string());
+    }
+    std::fs::read_to_string(&mcp_path).map_err(|e| e.to_string())
+}
+
+/// Parse and persist raw mcp.json text. Returns a serde error (with line/col) on
+/// invalid input without writing anything to disk.
+pub async fn save_mcp_config_text(
+    pool: &sqlx::SqlitePool,
+    app_data_dir: &Path,
+    text: &str,
+) -> Result<McpConfig, String> {
+    let config: McpConfig = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    save_mcp_config(pool, app_data_dir, &config, true).await?;
+    Ok(config)
 }
 
 use sqlx::SqlitePool;
@@ -85,6 +123,9 @@ struct StdioConnection {
     request_id: AtomicU32,
     #[allow(dead_code)]
     server_name: String,
+    /// Per-server timeout override (seconds). When `Some`, used in place of the
+    /// caller-provided `timeout_secs` in `call_tool`.
+    timeout_secs: Option<u64>,
 }
 
 /// Holds running MCP server processes and allows tools/call.
@@ -123,6 +164,10 @@ impl McpRuntime {
             if entry.command.is_empty() {
                 continue;
             }
+            if entry.disabled.unwrap_or(false) {
+                log::info!("[mcp] Server {} is disabled, skipping", server_name);
+                continue;
+            }
             if let Err(e) = spawn_and_register(self, server_name, entry, registry) {
                 log::error!("[mcp] Server {} failed to start: {}", server_name, e);
             }
@@ -142,6 +187,7 @@ impl McpRuntime {
         let conn = guard
             .get_mut(server_name)
             .ok_or_else(|| format!("MCP server not connected: {}", server_name))?;
+        let effective_timeout = conn.timeout_secs.unwrap_or(timeout_secs);
         let id = conn.request_id.fetch_add(1, Ordering::SeqCst);
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -163,7 +209,7 @@ impl McpRuntime {
         let stdout = conn.child.stdout.as_mut().ok_or("Server stdout closed")?;
         let mut reader = BufReader::new(stdout);
         let mut response_line = String::new();
-        let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+        let deadline = std::time::Instant::now() + Duration::from_secs(effective_timeout);
         loop {
             if std::time::Instant::now() > deadline {
                 return Err("MCP tools/call timeout".to_string());
@@ -358,6 +404,7 @@ fn spawn_and_register(
             child,
             request_id: AtomicU32::new(3),
             server_name: server_name.to_string(),
+            timeout_secs: entry.timeout,
         },
     );
 

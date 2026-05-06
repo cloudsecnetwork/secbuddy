@@ -174,6 +174,31 @@ fn test_mcp_server(entry: mcp_client::McpServerEntry) -> Result<u32, String> {
     mcp_client::test_mcp_server(&entry)
 }
 
+#[tauri::command]
+fn get_mcp_config_text(state: tauri::State<AppState>) -> Result<String, String> {
+    mcp_client::read_mcp_json_text(&state.app_data_dir)
+}
+
+#[tauri::command]
+fn save_mcp_config_text(state: tauri::State<AppState>, text: String) -> Result<(), String> {
+    let pool = state.db.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let tools = state.tools.clone();
+    let mcp_runtime = state.mcp_runtime.clone();
+    tauri::async_runtime::block_on(async move {
+        let config = mcp_client::save_mcp_config_text(&pool, &app_data_dir, &text).await?;
+        mcp_runtime.reload(&pool, &app_data_dir, &config, &tools)?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn get_mcp_config_path(state: tauri::State<AppState>) -> Result<String, String> {
+    Ok(mcp_client::mcp_json_path(&state.app_data_dir)
+        .to_string_lossy()
+        .into_owned())
+}
+
 // Attach files / artifacts in chat deferred to later phase (can be hefty).
 // #[tauri::command]
 // fn attach_file_to_chat(
@@ -678,6 +703,9 @@ pub fn run() {
             save_mcp_config,
             reload_mcp_servers,
             test_mcp_server,
+            get_mcp_config_text,
+            save_mcp_config_text,
+            get_mcp_config_path,
             send_message,
             // attach_file_to_chat,
             create_chat,
